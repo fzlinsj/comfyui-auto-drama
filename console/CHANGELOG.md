@@ -5,6 +5,184 @@
 
 ---
 
+## 2026-09-24 - v0.13.22 - 重生成后自动显示任务状态
+### 本次更新内容
+
+- **重生成流程**：`/api/regenerate` 成功返回后，前端自动切换到第 7 步“提交生成”，并重置状态分页，立即显示刚创建的新版本任务。
+- **轮询保持**：继续使用现有状态轮询，不改变重生成参数、链式衔接或整批提交行为。
+- **回归测试**：新增前端源码回归测试，确保成功重生成包含状态页导航和分页重置。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_regenerate_ui -v`
+- `python -m py_compile console/batch_console.py console/start_daemons.py console/chain_daemon.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 仅影响点击“重新生成”后的界面展示；任务仍按原接口提交到当前配置的 ComfyUI 服务器。
+- 第 7 步会显示所有任务，最新重生成版本按现有状态排序置顶。
+
+
+## 2026-09-24 - v0.13.21 - 允许失败任务重新生成
+### 本次更新内容
+
+- **提交生成页**：`F-LOST` 等失败任务现在显示“重新生成”按钮，复用现有的重新生成接口；已完成任务的行为保持不变。
+- **接口兼容**：修复重新生成接口仍按旧版返回值解包导致连接被关闭、前端显示 `Failed to fetch` 的问题。
+
+### 验证方式
+
+- `python -m py_compile console/batch_console.py`
+- `git diff --check`
+- 检查失败任务卡片的状态渲染条件包含 `error`。
+
+### 影响与注意事项
+
+- 重新生成会创建新的任务版本并实际占用 ComfyUI/GPU；链式重新生成仍需上一段已有视频，首段不应开启链式衔接。
+
+
+## 2026-09-23 - v0.13.20 - 适配 AutoDL MiniMax H3 镜像模型文件名
+
+### 本次更新内容
+
+- **T2V/I2V/R2V Turbo LoRA**：统一改用 AutoDL 镜像已安装的 `minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors`。
+- **I2V 文本编码器**：改用镜像已安装的 H3 Heretic NVFP4 编码器 `qwen3vl_32b_heretic_minimax_h3_nvfp4.safetensors`。
+- **回归测试**：新增三种任务模式的 API 工作流构建检查，并确认 R2V 官方 Ref2VA UNet/CLIP 配置保持不变。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_autodl_model_compat -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile workflows/build_api_graphs.py console/batch_console.py console/start_daemons.py console/chain_daemon.py`
+- 使用 JSON 解析器验证 T2V 与 I2V 模板；`git diff --check`
+
+### 影响与注意事项
+
+- T2V、I2V、R2V 将选择 AutoDL 镜像中已存在的 H3 权重文件名，不修改服务器文件或额外下载模型。
+- 其他 ComfyUI 环境若没有这些权重，需要恢复为该环境实际安装的模型文件名。
+- 修改后需重启本地控制台后台服务，再提交低分辨率预览任务；本次未提交生成任务。
+
+### 失败码 / 错误提示变化
+
+- 不新增失败码；避免因 LoRA/CLIP 文件名不在 ComfyUI 可用模型列表中导致工作流校验失败。
+
+## 2026-09-23 - v0.13.19 - 修复 Windows 提交任务时工作流 JSON 编码错误
+
+### 本次更新内容
+
+- **工作流读取**：`workflows/build_api_graphs.py` 的 T2V、I2V、R2V 工作流 JSON 统一显式使用 UTF-8 读取，避免 Windows 默认 GBK 解码中文工作流失败。
+- **回归测试**：新增工作流编码测试，模拟 Windows 默认编码并覆盖三种任务模式。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_workflow_encoding -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile workflows/build_api_graphs.py console/batch_console.py console/start_daemons.py console/chain_daemon.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 仅影响工作流 JSON 的读取编码，不改变任务图结构或任务参数。
+- 修改后需重启控制台后台服务，再重新提交任务。
+
+### 失败码/错误提示变化
+
+- 修复提交任务时 `构建任务 ... 失败：'gbk' codec can't decode ...` 的编码错误。
+
+## 2026-09-22 · v0.13.18 — 修复云端生图成功后素材目录不存在导致落盘失败
+
+### 本次更新内容
+
+- **存储初始化**：服务加载配置后自动创建 `storage.asset_dirs` 中的素材目录；每次云端/本地图片落盘前再次确保目录存在。
+- **根因修复**：Agnes 已返回并计费后，原代码直接写入不存在的 `素材/`，触发 `No such file or directory`，导致前端看不到图片；现在目录会在写入前创建。
+- **错误提示**：`/api/asset_gen` 不再把所有供应商错误标记为“Boogu 生图失败”，统一显示“生图失败”。
+- **测试**：新增“素材目录不存在时自动创建”的回归测试。
+
+### 验证方式
+
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`：7 个测试全部通过。
+- `python -m py_compile console/batch_console.py console/start_daemons.py console/chain_daemon.py`：编译检查通过。
+- 项目根目录下已确认存在 `素材/` 与 `出镜素材/`。
+
+### 影响与注意事项
+
+- 不修改已有资产；缺失目录只会被创建。
+- 已扣费但落盘失败的历史 Agnes 响应未被保存到本地，无法由控制台恢复，需要重新生成。
+- 新代码需重启控制台后台服务后生效。
+
+### 失败码 / 错误提示变化
+
+- 不新增失败码；修复 `No such file or directory: ...\\素材\\*.png` 错误。
+
+## 2026-09-22 · v0.13.17 — 修正 Agnes 文生图响应与错误回退
+
+### 本次更新内容
+
+- **请求格式**：参考已验证的 Agnes 适配器，纯文生图改用 `return_base64: true`；仍发送 `size` 与 `ratio`，并兼容 `b64_json`/URL 响应。
+- **错误链路**：Agnes 云端请求失败时不再回退本地 Boogu，保留 Agnes 原始异常，避免把已扣费的云端请求误报为本地“未返回图片数据”。
+- **测试**：新增 Agnes 云端错误不回退、请求体和 URL 下载回归测试。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_agnes_image -v`：3 个测试全部通过。
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`：全部回归测试通过。
+- `python -m py_compile console/batch_console.py console/start_daemons.py console/chain_daemon.py`：编译检查通过。
+
+### 影响与注意事项
+
+- Agnes 失败不会再触发本地 Boogu 请求，不会产生第二次生图调用。
+- OpenAI、DashScope 和本地 Boogu 的原有回退逻辑不变。
+- 已经扣费但未返回图片的请求需要在 Agnes 后台按请求记录查询，代码无法撤销供应商侧扣费。
+
+### 失败码 / 错误提示变化
+
+- Agnes 请求失败时，前端将显示 Agnes 的 HTTP/响应错误，不再显示误导性的 Boogu 错误。
+
+## 2026-09-22 · v0.13.16 — 适配 Agnes Image API 生图请求格式
+
+### 本次更新内容
+
+- **后端**：新增 Agnes 生图适配器，按官方格式发送 `size`、`ratio` 和 `extra_body.response_format=url`，并支持 URL/b64 图片响应落盘。
+- **兼容选择**：设置中新增 Agnes 接口格式；即使旧配置仍写 `openai`，只要 base_url 是 `apihub.agnes-ai.com` 也会自动识别为 Agnes。
+- **前端**：保留现有云端地址、模型和 API Key 配置方式，仅增加协议选项。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_agnes_image -v`：2 个 Agnes 适配测试通过。
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`：全部回归测试通过。
+- `python -m py_compile console/batch_console.py console/start_daemons.py console/chain_daemon.py`：编译检查通过。
+
+### 影响与注意事项
+
+- Agnes 请求默认使用 `2K`；控制台当前资产图尺寸 `768x1024` 映射为 `3:4`，宽屏输入映射为 `16:9`。
+- OpenAI 兼容和 DashScope 生图请求不变。
+- 生图仍会执行现有图片质检；质检失败会按原逻辑重试并返回问题列表。
+
+### 失败码 / 错误提示变化
+
+- Agnes 无 URL/b64 图片内容时返回“Agnes 生图返回无图片 URL 或 b64 数据”。
+- 其他 HTTP 错误继续沿用 `/api/asset_gen` 的“Boogu 生图失败：...”包装。
+
+## 2026-09-22 · v0.13.15 — 修复剧本 JSON 导入后分镜表格字段为空
+
+### 本次更新内容
+
+- **后端**：`/api/import_script` 在保留生成用 `tasks` 的同时，新增标准化 `script`，保留标题、角色表以及每段的场景、角色、动作、对白、情绪、运镜和时长。
+- **兼容格式**：标准化逻辑继续支持 `storyboard_list`、`segments` 等分镜容器及 `location`、`characters` 等字段别名；现有 Prompt 块导入和任务提交结构不变。
+- **测试**：新增剧本导入回归测试，覆盖标准 Novel-Director 字段和 ArcReel 风格别名字段。
+
+### 验证方式
+
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`：3 个测试全部通过。
+- `python -m py_compile console/batch_console.py console/start_daemons.py console/chain_daemon.py`：编译检查通过。
+- 通过导入接口响应检查 `script` 与 `tasks` 同时存在，前端已有 `d.script` 分支负责渲染表格。
+
+### 影响与注意事项
+
+- 已有项目数据和生成任务不受影响；只影响剧本 JSON 导入响应和脚本表格显示。
+- 导入格式错误或没有分镜时仍返回原有错误提示。
+- 无新增或修改失败码。
+
 ## 2026-08-16 · v0.13.14 — 开源补 GitHub Issue/PR 模板
 
 ### 本次更新内容

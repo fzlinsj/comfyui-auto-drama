@@ -553,6 +553,7 @@
       <label class="field" style="flex-direction:row;align-items:center;gap:8px">云端接口格式
         <select id="imgProviderType" style="flex:1">
           <option value="openai">OpenAI 兼容（gpt-image / DALL-E）</option>
+          <option value="agnes">Agnes Image API（agnes-image-2.5-flash）</option>
           <option value="dashscope">通义万相（DashScope 异步）</option>
         </select>
       </label>
@@ -1457,7 +1458,7 @@ function renderStatusCards() {
       const del = !active
         ? `<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--red)" onclick="deleteVideo('${escAttr(t.id)}')">🗑️ 删除</button>`
         : '';
-      const regen = t.status === 'completed'
+      const regen = ['completed', 'error'].includes(t.status)
         ? `<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--blue)" onclick="regenerateVideo('${escAttr(t.id)}')">🔄 重新生成</button>`
         : '';
       return `<div class="card-item${active ? ' generating' : ''}"><div class="r1"><span class="name">${esc(t.name)}</span><span style="display:flex;align-items:center;gap:7px">${spin}${pill(t.status)}</span></div>
@@ -1804,7 +1805,8 @@ async function regenSubmit() {
     $('regenModalBg').style.display = 'none';
     regenTaskId = null;
     toast('🔄 已提交重新生成（新版本会自动加序号）');
-    refreshStatus();
+    statusPage = 0;
+    goStep(7);
     startPoll();
   } catch (e) { toast('重新生成失败：' + e.message, true); }
 }

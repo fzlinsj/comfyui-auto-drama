@@ -17,7 +17,7 @@ R2V_TEMPLATE = os.path.join(BASE, "r2v_api_template.json")
 TASKS_DIR = os.path.join(BASE, "tasks")
 
 # Ref2VA 加速 + 无审查模型配置（覆盖 r2v 模板默认值）
-R2V_TURBO_LORA = "minimax_h3_turbo_v4_step600_ema.safetensors"
+R2V_TURBO_LORA = "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors"
 R2V_LORA_STRENGTH = 0.75
 R2V_STEPS = 4
 R2V_CLIP_DEFAULT = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"  # 开源默认：官方文本编码器
@@ -176,7 +176,8 @@ RETRY_TASKS = [
 
 def convert_t2v(task):
     """前端工作流 JSON → API 图。"""
-    wf = json.load(open(T2V_WF))
+    with open(T2V_WF, encoding="utf-8") as f:
+        wf = json.load(f)
     link_map = {}
     for link in wf.get("links", []):
         link_map[link[0]] = (str(link[1]), link[2])
@@ -218,7 +219,8 @@ def convert_t2v(task):
 
 def build_i2v(task):
     """队列快照模板 → 清理增强器 → API 图。"""
-    q = json.load(open(I2V_TEMPLATE))
+    with open(I2V_TEMPLATE, encoding="utf-8") as f:
+        q = json.load(f)
     prompt = q["queue_running"][0][2]
     drop = {"105:121", "105:122", "105:123", "105:124"}
     prompt = {k: v for k, v in prompt.items() if k not in drop}
@@ -269,7 +271,8 @@ def build_r2v(task):
     is_final = quality == "final"
     steps = int(task.get("steps") or (R2V_FINAL_STEPS if is_final else R2V_STEPS))
     use_turbo = steps <= 8
-    wf = json.load(open(R2V_TEMPLATE))
+    with open(R2V_TEMPLATE, encoding="utf-8") as f:
+        wf = json.load(f)
     link_map = {}
     for link in wf.get("links", []):
         link_map[link[0]] = (str(link[1]), link[2])

@@ -124,6 +124,20 @@ LMSTUDIO_URL = _CONFIG["llm"]["local"]["url"]
 LMSTUDIO_MODEL = _CONFIG["llm"]["local"]["model"]
 BOOGU_URL = _CONFIG["image_gen"]["local"]["url"]
 
+
+def _ensure_image_dirs():
+    """确保配置的素材目录存在，避免云端生成成功后落盘失败。"""
+    for directory in IMAGE_DIRS:
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+
+_ensure_image_dirs()
+
+
+def _image_error_message(error):
+    return f"生图失败：{error}"
+
 # 项目进度状态机（0-6）：仅创建 → 剧本 → 改写 → 提示词 → 资产 → 提交 → 出片
 PROGRESS_LABELS = [
     "仅创建", "剧本已生成", "剧本已改写", "提示词已生成",
@@ -1945,6 +1959,32 @@ def _sb_duration(sb, default=10):
     return default
 
 
+def _normalize_script(data, title, role_map, storyboards):
+    """将多种剧本 JSON 结构统一为前端脚本表格使用的字段。"""
+    storyboard_list = []
+    for i, sb in enumerate(storyboards):
+        item = {
+            "id": _pick(sb, "id", "index") or i + 1,
+            "scene": str(_pick(sb, "scene", "location", "place", "scene_name") or "").strip(),
+            "roles": _sb_roles(sb),
+            "action": str(_pick(sb, "action", "motion", "action_desc") or "").strip(),
+            "dialogue": str(_pick(sb, "dialogue", "line", "speech", "台词") or "").strip(),
+            "emotion": str(_pick(sb, "emotion", "mood", "tone") or "").strip(),
+            "camera": str(_pick(sb, "camera", "camera_move", "shot_type") or "").strip(),
+            "duration": _sb_duration(sb),
+        }
+        prompt = str(_pick(sb, "prompt", "video_prompt", "text", "description") or "").strip()
+        if prompt:
+            item["prompt"] = prompt
+        storyboard_list.append(item)
+    return {
+        "title": title,
+        "logline": str(_pick(data, "logline", "summary", "synopsis") or "").strip(),
+        "role_list": list(role_map.values()),
+        "storyboard_list": storyboard_list,
+    }
+
+
 _DIALOGUE_LINE_RE = re.compile(
     r"([\u4e00-\u9fff]{1,8})(?:（([^）]*)）)?[：:]\s*[\"“](.*?)"
     r"(?=[\u4e00-\u9fff]{1,8}(?:（[^）]*）)?[：:][\"“]|\u201d|$)",
@@ -2703,6 +2743,67 @@ def _img_openai(ep, prompt, filename, size="768x1024", timeout=300):
     return filename, dest
 
 
+def _agnes_size_ratio(size):
+    """将控制台像素尺寸映射为 Agnes 的质量档位和画面比例。"""
+    value = str(size or "").strip().upper()
+    if re.fullmatch(r"[1-4]K", value):
+        return value, "1:1"
+    m = re.match(r"^(\d+)\s*[Xx]\s*(\d+)$", value)
+    if not m:
+        return "2K", "1:1"
+    width, height = int(m.group(1)), int(m.group(2))
+    if width == height:
+        ratio = "1:1"
+    elif width / max(height, 1) >= 1.5:
+        ratio = "16:9"
+    elif width > height:
+        ratio = "4:3"
+    else:
+        ratio = "3:4"
+    return "2K", ratio
+
+
+def _agnes_payload(prompt, size, model):
+    quality, ratio = _agnes_size_ratio(size)
+    return {
+        "model": model or "agnes-image-2.5-flash",
+        "prompt": prompt,
+        "size": quality,
+        "ratio": ratio,
+        "return_base64": True,
+    }
+
+
+def _img_agnes(ep, prompt, filename, size="768x1024", timeout=300):
+    """Agnes Image API 适配器：按官方格式请求并下载 URL/b64 图片。"""
+    if not ep.get("url"):
+        raise RuntimeError("Agnes 生图端点未配置")
+    payload = _agnes_payload(prompt, size, ep.get("model"))
+    req = urllib.request.Request(
+        _v1(ep["url"]) + "/images/generations",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **_lm_headers(ep.get("api_key") or "")},
+    )
+    with _opener().open(req, timeout=timeout) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    item = (data.get("data") or [{}])[0]
+    b64 = item.get("b64_json")
+    if b64:
+        raw = base64.b64decode(b64)
+    else:
+        image_url = item.get("url") or item.get("image_url")
+        if not image_url:
+            raise RuntimeError("Agnes 生图返回无图片 URL 或 b64 数据")
+        with _opener().open(image_url, timeout=timeout) as fr:
+            raw = fr.read()
+    _ensure_image_dirs()
+    _ensure_image_dirs()
+    dest = os.path.join(IMAGE_DIRS[0], filename)
+    with open(dest, "wb") as f:
+        f.write(raw)
+    return filename, dest
+
+
 def _img_dashscope(ep, prompt, filename, size="768x1024", timeout=300):
     """通义万相（DashScope）适配器：异步任务 + 轮询结果。"""
     if not ep.get("url"):
@@ -2746,6 +2847,7 @@ def _img_dashscope(ep, prompt, filename, size="768x1024", timeout=300):
                 raise RuntimeError("DashScope 任务成功但无图片 URL")
             with _opener().open(url, timeout=timeout) as fr:
                 raw = fr.read()
+            _ensure_image_dirs()
             dest = os.path.join(IMAGE_DIRS[0], filename)
             with open(dest, "wb") as f:
                 f.write(raw)
@@ -2757,8 +2859,17 @@ def _img_dashscope(ep, prompt, filename, size="768x1024", timeout=300):
 
 _IMG_ADAPTERS = {
     "openai": _img_openai,
+    "agnes": _img_agnes,
     "dashscope": _img_dashscope,
 }
+
+
+def _image_adapter_type(ep):
+    """选择生图协议；Agnes 地址即使旧配置写 openai 也自动识别。"""
+    atype = str(ep.get("provider_type") or "openai").strip() or "openai"
+    if atype == "openai" and "agnes-ai.com" in str(ep.get("url") or "").lower():
+        return "agnes"
+    return atype
 
 
 def boogu_generate(prompt, filename, size="768x1024", timeout=300):
@@ -2767,11 +2878,11 @@ def boogu_generate(prompt, filename, size="768x1024", timeout=300):
     last_err = None
     if main.get("provider") == "cloud":
         try:
-            atype = str(main.get("provider_type") or "openai").strip() or "openai"
+            atype = _image_adapter_type(main)
             return _IMG_ADAPTERS.get(atype, _img_openai)(main, prompt, filename, size, timeout)
         except Exception as e:
             last_err = e
-            if backup is None or backup.get("provider") != "local":
+            if atype == "agnes" or backup is None or backup.get("provider") != "local":
                 raise
     # 本地 Boogu
     try:
@@ -2779,7 +2890,7 @@ def boogu_generate(prompt, filename, size="768x1024", timeout=300):
     except Exception as e:
         last_err = e
         if backup and backup.get("provider") == "cloud":
-            atype = str(backup.get("provider_type") or "openai").strip() or "openai"
+            atype = _image_adapter_type(backup)
             return _IMG_ADAPTERS.get(atype, _img_openai)(backup, prompt, filename, size, timeout)
         raise
 
@@ -2800,6 +2911,7 @@ def _boogu_local(prompt, filename, size="768x1024", timeout=300):
     raw = base64.b64decode(b64)
     if not filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
         filename += ".png"
+    _ensure_image_dirs()
     dest = os.path.join(IMAGE_DIRS[0], filename)
     with open(dest, "wb") as f:
         f.write(raw)
@@ -3602,11 +3714,18 @@ def parse_script_json(text):
         warnings.append("未匹配到任何角色参考图，全部段将用 T2V 生成（建议先上传角色锚点图）")
 
     meta = {
+        "script": _normalize_script(data, title, role_map, storyboards),
         "role_images": role_images,
         "scene_image": scene_image,
         "warnings": list(dict.fromkeys(warnings)),
     }
     return rows, meta
+
+
+def import_script_payload(text):
+    """构造剧本 JSON 导入接口响应，保留脚本表格与生成任务两套数据。"""
+    rows, meta = parse_script_json(text)
+    return {"tasks": rows, **meta}
 
 
 def _clean_json_text(text):
@@ -3960,7 +4079,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 fn, dest = boogu_generate(prompt, filename, size)
             except Exception as e:
-                self._send(400, json.dumps({"error": f"Boogu 生图失败：{e}"}, ensure_ascii=False))
+                self._send(400, json.dumps({"error": _image_error_message(e)}, ensure_ascii=False))
                 return
             self._send(200, json.dumps({"filename": fn, "path": dest}, ensure_ascii=False))
             return
@@ -3978,7 +4097,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     fn, dest = boogu_generate(prompt, filename, "768x1024")
                 except Exception as e:
-                    self._send(400, json.dumps({"error": f"Boogu 生图失败：{e}"}, ensure_ascii=False))
+                    self._send(400, json.dumps({"error": _image_error_message(e)}, ensure_ascii=False))
                     return
                 attempts += 1
                 v = verify_asset(dest, kind, expected)
@@ -4184,14 +4303,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"tasks": rows, "detected": "prompts"}, ensure_ascii=False))
                 return
             try:
-                rows, meta = parse_script_json(text)
+                payload = import_script_payload(text)
             except Exception as e:
                 self._send(400, json.dumps({"error": f"剧本解析失败：{e}"}, ensure_ascii=False))
                 return
+            rows = payload["tasks"]
             if not rows:
-                self._send(400, json.dumps({"error": meta.get("warnings", ["剧本为空"])[0]}, ensure_ascii=False))
+                self._send(400, json.dumps({"error": payload.get("warnings", ["剧本为空"])[0]}, ensure_ascii=False))
                 return
-            self._send(200, json.dumps({"tasks": rows, **meta}, ensure_ascii=False))
+            self._send(200, json.dumps(payload, ensure_ascii=False))
             return
         if path == "/api/expand_script":
             text = body.get("text", "")
@@ -4708,7 +4828,7 @@ class Handler(BaseHTTPRequestHandler):
                         st2["projects"] = projects2
                     save_state(st2)
             server = st.get("server") or DEFAULT_SERVER
-            results, err = submit_tasks(
+            results, err, _warnings = submit_tasks(
                 server, [new_task], auto_download=True,
                 chain_mode=bool(body.get("chain_mode")),
             )
