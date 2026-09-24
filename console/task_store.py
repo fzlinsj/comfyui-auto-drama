@@ -8,7 +8,7 @@ import uuid
 
 ALLOWED_TRANSITIONS = {
     "preflight_pending": {"preflight_failed", "ready", "cancelled"},
-    "preflight_failed": {"preflight_pending", "cancelled"},
+    "preflight_failed": {"preflight_pending", "ready", "cancelled"},
     "ready": {"submitting", "cancelled"},
     "submitting": {"queued", "failed", "cancelled"},
     "queued": {"running", "succeeded", "failed", "cancel_requested", "cancelled", "stale"},
@@ -173,7 +173,12 @@ class TaskStore:
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         conn = self._connect()
         try:
-            rows = conn.execute("SELECT * FROM task_attempts" + where + " ORDER BY created_at DESC", values).fetchall()
+            rows = conn.execute(
+                "SELECT task_attempts.*, task_segments.project_name, task_segments.display_name "
+                "FROM task_attempts JOIN task_segments ON task_segments.segment_key = task_attempts.segment_key"
+                + where.replace(" WHERE ", " WHERE task_attempts.")
+                + " ORDER BY task_attempts.created_at DESC", values
+            ).fetchall()
             return [self._row(row) for row in rows]
         finally:
             conn.close()

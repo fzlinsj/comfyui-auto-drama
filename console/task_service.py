@@ -8,10 +8,19 @@ except ImportError:
     from failure_diagnostics import FAILURE_SUMMARIES, parse_comfyui_failure
 
 
+class TaskPreparationError(Exception):
+    """Raised when a task cannot be materialized before ComfyUI validation."""
+
+    def __init__(self, failure):
+        self.failure = dict(failure or {})
+        super().__init__(self.failure.get("summary") or self.failure.get("code") or "task preparation failed")
+
+
 class TaskService:
-    def __init__(self, store, client_factory):
+    def __init__(self, store, client_factory, prepare_attempt=None):
         self.store = store
         self.client_factory = client_factory
+        self.prepare_attempt = prepare_attempt
 
     def _client(self, attempt):
         return self.client_factory(attempt.get("server_url") or "")
@@ -21,6 +30,8 @@ class TaskService:
 
     def list_control_tasks(self, project_name="", status_filter=""):
         attempts = self.store.list_attempts(statuses=[status_filter] if status_filter else None)
+        if project_name:
+            attempts = [item for item in attempts if item.get("project_name") == project_name]
         grouped = {}
         for attempt in attempts:
             grouped.setdefault(attempt["segment_key"], []).append(attempt)
@@ -30,9 +41,21 @@ class TaskService:
         attempt = self.store.get_attempt(attempt_id)
         if not attempt:
             raise KeyError(attempt_id)
+        if attempt["status"] == "preflight_failed":
+            attempt = self.store.transition(attempt_id, "preflight_pending")
         client = self._client(attempt)
         try:
+            if self.prepare_attempt:
+                prepared = self.prepare_attempt(attempt, client)
+                if isinstance(prepared, dict):
+                    parameters = prepared.get("parameters")
+                    if parameters is not None:
+                        attempt = self.store.update_attempt(attempt_id, parameters=parameters)
             result = client.preflight(self._graph(attempt))
+        except TaskPreparationError as exc:
+            failure = exc.failure
+            updated = self.store.transition(attempt_id, "preflight_failed", failure=failure)
+            return {"status": updated["status"], "failure": failure, "severity": "block"}
         except Exception as exc:
             failure = {"code": "F-CONNECTION", "summary": FAILURE_SUMMARIES["F-CONNECTION"], "raw_error": str(exc)}
             updated = self.store.transition(attempt_id, "preflight_failed", failure=failure)
@@ -138,7 +161,6 @@ class TaskService:
         if not parent:
             raise KeyError(attempt_id)
         parameters = copy.deepcopy(parent.get("parameters") or {})
-        parameters.pop("legacy", None)
         parameters.update(overrides or {})
         return self.store.get_attempt(self.store.create_attempt(
             segment_key=parent["segment_key"], status="preflight_pending", parameters=parameters,

@@ -14,6 +14,8 @@ FAILURE_SUMMARIES = {
     "F-SERVER-STALE": "任务不属于当前服务器或已被远端清除",
     "F-CANCELLED": "任务已由用户取消",
     "F-PROVIDER-RESPONSE": "供应商返回格式异常",
+    "F-CHAIN-PREDECESSOR-MISSING": "链式前置段不存在或尚未成功",
+    "F-CHAIN-FRAME-MISSING": "链式前置段末帧无法恢复",
 }
 
 

@@ -162,6 +162,15 @@
   .card-item .name { font-weight: 700; font-size: 13px; }
   .card-item .meta { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
   .card-item .outs { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .task-control-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:12px 0; }
+  .task-control-toolbar .hint { flex:1 1 260px; }
+  .task-control-item { border:1px solid var(--line); border-radius:10px; padding:12px; background:#fff; }
+  .task-control-item + .task-control-item { margin-top:8px; }
+  .task-control-item .actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:9px; }
+  .task-control-item .failure { color:var(--red); background:rgba(239,68,68,.06); border-radius:7px; padding:7px 9px; margin-top:7px; font-size:12px; white-space:pre-wrap; }
+  .task-control-item .history { margin-top:8px; font-size:11px; color:var(--muted); }
+  .task-summary { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
+  .task-summary strong { color:var(--text); }
   /* ---------- 抽屉 ---------- */
   .drawer-bg { position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 90; display: none; }
   .drawer {
@@ -223,6 +232,21 @@
   .ast-ok { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
   .cfg-block { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 12px 0; background: #fff; }
   .cfg-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .setting-choice { display: grid !important; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: center; gap: 8px; white-space: nowrap; }
+  .setting-choice > select, .setting-choice > input { min-width: 0; width: 100%; }
+  .provider-box { margin-top: 8px; }
+  .diag-inline { display: grid; grid-template-columns: repeat(auto-fit,minmax(128px,1fr)); gap: 7px; align-items: center; margin: 8px 0 12px; }
+  .diag-inline .btn { min-height: 34px; white-space: nowrap; }
+  .diag-inline .hint { grid-column: 1 / -1; min-height: 18px; }
+  .llm-chat-panel { border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; padding: 10px; margin-top: 8px; }
+  .llm-chat-messages { display: flex; flex-direction: column; gap: 7px; max-height: 260px; overflow: auto; margin-bottom: 8px; }
+  .llm-chat-message { max-width: 92%; padding: 7px 9px; border-radius: 8px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .llm-chat-message.user { align-self: flex-end; background: rgba(79,124,255,.12); }
+  .llm-chat-message.assistant { align-self: flex-start; background: #fff; border: 1px solid var(--line); }
+  .llm-chat-input { display: flex; gap: 7px; align-items: flex-end; }
+  .llm-chat-input textarea { flex: 1; min-width: 0; min-height: 58px; font-size: 12px; }
+  .llm-chat-actions { display: flex; flex-direction: column; gap: 6px; }
+  .diag-group-title { font-size: 11px; color: var(--muted); margin: 8px 0 2px; }
   .proj-bar { flex: 0 0 150px; height: 7px; border-radius: 999px; background: var(--border);
     overflow: hidden; }
   .proj-bar span { display: block; height: 100%; border-radius: 999px;
@@ -440,6 +464,50 @@
         <button class="btn" id="btnRefreshStatus">刷新</button>
       </div>
       <div id="statusCards"><div class="empty"><div class="big">🎬</div>提交后这里实时显示每段状态</div></div>
+      <div class="card" id="taskControlCard" style="margin-top:18px;box-shadow:none;background:#f8fafc">
+        <h2 style="font-size:15px">任务控制中心</h2>
+        <div class="desc">查看每个分段的尝试记录、失败详情、重试设置、取消操作和链式依赖。</div>
+        <div class="task-summary" id="taskServerSummary"><span>服务器状态：<strong>检查中</strong></span></div>
+        <div class="task-control-toolbar">
+          <select id="taskStatusFilter" style="width:150px">
+            <option value="">全部状态</option>
+            <option value="preflight_pending">等待预检</option>
+            <option value="preflight_failed">预检失败</option>
+            <option value="ready">就绪</option>
+            <option value="queued">排队中</option>
+            <option value="running">运行中</option>
+            <option value="cancel_requested">已请求取消</option>
+            <option value="blocked">链式依赖阻塞</option>
+            <option value="failed">失败</option>
+            <option value="stale">已失效</option>
+            <option value="succeeded">成功</option>
+            <option value="cancelled">已取消</option>
+          </select>
+          <button class="btn" id="btnTaskControlRefresh">刷新任务控制中心</button>
+          <button class="btn" style="color:var(--red)" id="btnCancelBatch">取消当前批次</button>
+          <span class="hint">运行中的任务需要确认后才能中断，已完成文件不会删除。</span>
+        </div>
+        <div id="taskControlList"><div class="empty">正在加载任务控制中心...</div></div>
+      </div>
+      <div class="card" id="diagnosticsCard" style="display:none;margin-top:18px;box-shadow:none;background:#f8fafc">
+        <h2 style="font-size:15px">服务诊断与单项测试</h2>
+        <div class="desc">先做免费连通性检查；真实生图/视频会消耗云端费用或 GPU，必须勾选确认后才会提交。</div>
+        <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap">
+          <select id="diagnosticService" style="width:190px">
+            <option value="agnes">Agnes 生图</option>
+            <option value="llm">LLM 对话</option>
+            <option value="comfyui_image">ComfyUI 生图</option>
+            <option value="comfyui_t2v">ComfyUI 文生视频</option>
+            <option value="comfyui_i2v">ComfyUI 图生视频</option>
+            <option value="comfyui_r2v">ComfyUI 参考图生视频</option>
+          </select>
+          <button class="btn" id="btnDiagnosticQuick">免费检查</button>
+          <label style="font-size:12px"><input type="checkbox" id="diagnosticCostConfirm"> 我确认可能产生费用</label>
+          <label style="font-size:12px"><input type="checkbox" id="diagnosticGpuConfirm"> 我确认使用 GPU</label>
+          <button class="btn blue" id="btnDiagnosticReal">开始真实测试</button>
+        </div>
+        <div id="diagnosticResult" class="hint" style="margin-top:10px">尚未测试</div>
+      </div>
       <div class="card" style="margin-top:18px;box-shadow:none;background:#f8fafc">
         <h2 style="font-size:15px">🎬 合成完整视频</h2>
         <div class="desc">把所有已下载的视频段按顺序拼接成完整成片（转码约 1-3 分钟）。</div>
@@ -504,6 +572,10 @@
   <div class="d-body">
     <label class="field">ComfyUI 服务器地址
       <input type="text" id="serverInput" placeholder="http://127.0.0.1:8188">
+    <div class="diag-group-title">连接与生图</div>
+    <div class="diag-inline"><button class="btn" data-diagnostic="comfyui" data-diagnostic-action="quick">检查配置</button><button class="btn blue" data-diagnostic="comfyui_image" data-diagnostic-action="real">测试生图</button><span id="diagComfyui" class="hint">检查地址、GPU、队列及输出</span></div>
+    <div class="diag-group-title">视频工作流</div>
+    <div class="diag-inline"><button class="btn blue" data-diagnostic="comfyui_t2v" data-diagnostic-action="real">测试 T2V</button><button class="btn blue" data-diagnostic="comfyui_i2v" data-diagnostic-action="real">测试 I2V</button><button class="btn blue" data-diagnostic="comfyui_r2v" data-diagnostic-action="real">测试 R2V</button><span id="diagComfyuiVideo" class="hint">会使用 GPU 生成短测试片段</span></div>
     </label>
     <div class="row">
       <button class="btn" id="btnCheck">连接测试</button>
@@ -511,20 +583,20 @@
     </div>
     <div class="cfg-block">
       <div class="cfg-title">🧠 语言模型（剧本/提示词）</div>
-      <label class="field" style="flex-direction:row;align-items:center;gap:8px">使用
+      <label class="field setting-choice"> <span>使用</span>
         <select id="llmProvider" style="flex:1">
           <option value="local">本地模型（LM Studio / Ollama）</option>
           <option value="cloud">云端 API（OpenAI 兼容）</option>
         </select>
       </label>
-      <label class="field" style="flex-direction:row;align-items:center;gap:8px">云端接口格式
-        <select id="llmProviderType" style="flex:1">
-          <option value="openai">OpenAI 兼容（DeepSeek/通义/豆包/Gemini）</option>
-          <option value="claude">Claude（Anthropic Messages）</option>
-          <option value="dashscope">通义千问（DashScope 原生）</option>
-        </select>
-      </label>
-      <div id="llmCloudBox">
+      <div id="llmCloudBox" class="provider-box">
+        <label class="field setting-choice" id="llmProviderTypeRow"><span>云端接口格式</span>
+          <select id="llmProviderType">
+            <option value="openai">OpenAI 兼容（DeepSeek/通义/豆包/Gemini）</option>
+            <option value="claude">Claude（Anthropic Messages）</option>
+            <option value="dashscope">通义千问（DashScope 原生）</option>
+          </select>
+        </label>
         <label class="field">云端接口地址（base_url）
           <input type="text" id="llmCloudUrl" placeholder="https://api.openai.com/v1">
         </label>
@@ -535,42 +607,76 @@
           <input type="password" id="llmCloudKey" placeholder="sk-...">
         </label>
       </div>
-      <label class="field">本地模型地址
-        <input type="text" id="llmLocalUrl" placeholder="http://127.0.0.1:1234">
-      </label>
-      <label class="field">本地模型名
-        <input type="text" id="llmLocalModel" placeholder="qwen3.6-27b-abliterated-mlx">
-      </label>
+      <div id="llmLocalBox" class="provider-box">
+        <label class="field">本地模型地址
+          <input type="text" id="llmLocalUrl" placeholder="http://127.0.0.1:1234">
+        </label>
+        <label class="field">本地模型名
+          <input type="text" id="llmLocalModel" placeholder="qwen3.6-27b-abliterated-mlx">
+        </label>
+      </div>
+      <div class="diag-inline"><button class="btn" data-diagnostic="llm" data-diagnostic-action="quick">免费检查 LLM</button><button class="btn blue" data-diagnostic="llm" data-diagnostic-action="real">真实对话测试</button><span id="diagLlm" class="hint">读取当前 LLM 配置</span></div>
+      <div id="llmChatPanel" class="llm-chat-panel" style="display:none">
+        <div id="llmChatMessages" class="llm-chat-messages"></div>
+        <div class="llm-chat-input">
+          <textarea id="llmChatInput" rows="2" placeholder="输入问题后发送"></textarea>
+          <div class="llm-chat-actions">
+            <button class="btn blue" id="btnLlmChatSend">发送</button>
+            <button class="btn" id="btnLlmChatClose">关闭</button>
+          </div>
+        </div>
+        <div id="llmChatHint" class="hint" style="margin-top:6px"></div>
+      </div>
     </div>
     <div class="cfg-block">
       <div class="cfg-title">🖼️ 文生图模型（锚点图/场景图/分镜图）</div>
-      <label class="field" style="flex-direction:row;align-items:center;gap:8px">使用
+      <label class="field setting-choice"> <span>使用</span>
         <select id="imgProvider" style="flex:1">
           <option value="local">本地（Boogu-Image）</option>
-          <option value="cloud">云端 API（OpenAI 兼容）</option>
+          <option value="cloud">云端 API</option>
+          <option value="comfyui">ComfyUI 工作流</option>
         </select>
       </label>
-      <label class="field" style="flex-direction:row;align-items:center;gap:8px">云端接口格式
-        <select id="imgProviderType" style="flex:1">
+      <div id="imgCloudBox" class="provider-box">
+        <label class="field setting-choice" id="imgProviderTypeRow"><span>云端接口格式</span>
+          <select id="imgProviderType">
           <option value="openai">OpenAI 兼容（gpt-image / DALL-E）</option>
           <option value="agnes">Agnes Image API（agnes-image-2.5-flash）</option>
           <option value="dashscope">通义万相（DashScope 异步）</option>
-        </select>
-      </label>
-      <div id="imgCloudBox">
+          </select>
+        </label>
         <label class="field">云端接口地址（base_url）
           <input type="text" id="imgCloudUrl" placeholder="https://api.openai.com/v1">
         </label>
         <label class="field">云端图片模型
-          <input type="text" id="imgCloudModel" placeholder="gpt-image-1">
+          <select id="imgCloudModelSelect">
+            <option value="gpt-image-1" data-provider="openai">gpt-image-1</option>
+            <option value="gpt-image-1-mini" data-provider="openai">gpt-image-1-mini</option>
+            <option value="dall-e-3" data-provider="openai">dall-e-3</option>
+            <option value="agnes-image-2.5-flash" data-provider="agnes">agnes-image-2.5-flash</option>
+            <option value="agnes-image-2.5" data-provider="agnes">agnes-image-2.5</option>
+            <option value="wanx-v1" data-provider="dashscope">wanx-v1</option>
+            <option value="__custom__">自定义模型</option>
+          </select>
+          <input type="text" id="imgCloudModel" placeholder="输入自定义模型名称" style="display:none">
         </label>
         <label class="field">云端 API Key
           <input type="password" id="imgCloudKey" placeholder="sk-...">
         </label>
       </div>
-      <label class="field">本地生图地址
-        <input type="text" id="imgLocalUrl" placeholder="http://127.0.0.1:8081">
-      </label>
+      </div>
+      <div id="imgLocalBox" class="provider-box">
+        <label class="field">本地生图地址
+          <input type="text" id="imgLocalUrl" placeholder="http://127.0.0.1:8081">
+        </label>
+      </div>
+      <div id="imgComfyuiBox" class="provider-box">
+        <label class="field">SDXL 检查点模型
+          <input type="text" id="imgComfyuiCheckpoint" placeholder="sd_xl_base_1.0.safetensors">
+        </label>
+        <div class="hint">使用上方 ComfyUI 服务器地址，通过 SDXL 工作流生成图片。</div>
+      </div>
+      <div class="diag-inline"><button class="btn" data-diagnostic="image" data-diagnostic-action="quick">检查当前生图接口</button><button class="btn blue" data-diagnostic="image" data-diagnostic-action="real">真实生图测试</button><span id="diagImage" class="hint">会根据当前提供商执行测试</span></div>
     </div>
     <div class="cfg-block">
       <div class="cfg-title">🎬 R2V（Ref2VA）模型（参考图出片）</div>
@@ -579,6 +685,7 @@
       </label>
       <label class="field">CLIP 文本编码器（models/text_encoders 下的文件名）
         <input type="text" id="r2vClip" placeholder="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors">
+        <div class="diag-inline"><button class="btn blue" data-diagnostic="comfyui_r2v" data-diagnostic-action="real">测试 R2V 工作流</button><span id="diagR2v" class="hint">会使用 GPU 生成测试片段</span></div>
       </label>
       <div class="hint">提交 R2V 时自动检测服务器上的权重，缺失则回退 FL2VA 并提示。</div>
     </div>
@@ -727,6 +834,39 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="modal-bg" id="taskDetailModalBg">
+  <div class="modal" style="width:min(760px,94vw)">
+    <h3 id="taskDetailTitle">任务尝试</h3>
+    <div class="hint" id="taskDetailMeta" style="margin-bottom:10px"></div>
+    <div id="taskFailureDetail" class="failure" style="display:none"></div>
+    <div id="taskAttemptHistory" class="history" style="margin-bottom:12px"></div>
+    <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:10px">
+      <label class="field">分辨率（MP）
+        <select id="taskRetryMp"><option value="0.4">0.4</option><option value="1.0">1.0</option><option value="1.5">1.5</option></select>
+      </label>
+      <label class="field">步数
+        <select id="taskRetrySteps"><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="20">20</option><option value="30">30</option><option value="50">50</option></select>
+      </label>
+      <label class="field">时长（秒）
+        <input id="taskRetryDuration" type="number" min="1" max="60" step="1">
+      </label>
+    </div>
+    <label class="field" style="flex-direction:row;align-items:center;gap:8px;margin:12px 0 6px">
+      <input type="checkbox" id="taskRetryChain" style="width:auto"> 使用链式前置段
+    </label>
+    <label class="field">前置段尝试
+      <select id="taskRetryPredecessor"><option value="">选择已成功的前置段</option></select>
+    </label>
+    <div class="hint" style="margin-top:8px">链式重试必须明确选择一个已成功的前置段；取消勾选后将独立运行本段。</div>
+    <div class="row" style="justify-content:flex-end;gap:10px;margin-top:16px">
+      <button class="btn" id="btnTaskPreflight">运行预检</button>
+      <button class="btn" id="btnTaskResolveChain">解析链式依赖</button>
+      <button class="btn" id="btnTaskRetryCancel">关闭</button>
+      <button class="btn primary" id="btnTaskRetrySubmit">创建重试任务</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 let images = [];
@@ -756,7 +896,7 @@ function goStep(n) {
     el.classList.toggle('done', parseInt(el.dataset.step) < n);
   });
   document.querySelector(`.step[data-step="${n}"]`).classList.add('active');
-  if (n === 7) refreshStatus();
+  if (n === 7) { refreshStatus(); loadTaskControl(); }
   if (n === 8) refreshRecords();
   if (n === 6) renderPreview();
   if (n === 3) {
@@ -1473,10 +1613,118 @@ function renderStatusCards() {
 }
 function startPoll() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(refreshStatus, 8000);
+  pollTimer = setInterval(() => { refreshStatus(); loadTaskControl(); }, 8000);
 }
 
 // ---------- ⑧ 记录 ----------
+// ---------- Task control center ----------
+let taskControlCache = [];
+let taskControlAttempt = null;
+const TASK_STATUS_LABELS = {
+  preflight_pending: '等待预检', preflight_failed: '预检失败', ready: '就绪',
+  submitting: '提交中', queued: '排队中', running: '运行中', cancel_requested: '已请求取消',
+  cancelled: '已取消', blocked: '链式依赖阻塞', failed: '失败', stale: '已失效', succeeded: '成功',
+};
+const TASK_ACTIVE_STATUSES = new Set(['queued', 'running', 'cancel_requested']);
+const TASK_TERMINAL_STATUSES = new Set(['failed', 'stale', 'cancelled', 'succeeded']);
+function taskLabel(status) { return TASK_STATUS_LABELS[status] || status || '未知'; }
+function taskParams(attempt) { const p = (attempt && attempt.parameters) || {}; return Object.assign({}, p.legacy || {}, p); }
+function taskFailureText(failure) {
+  if (!failure) return '';
+  return [...new Set([failure.code, failure.summary || failure.message, failure.detail, failure.raw_error].filter(Boolean).map(String))].join('\n');
+}
+async function readTaskResponse(response) {
+  const raw = await response.text();
+  let d = {};
+  if (raw.trim()) { try { d = JSON.parse(raw); } catch (_) { d = {error: raw.trim()}; } }
+  if (!response.ok) {
+    const missing = response.status === 404 && (!d || d.error === 'not found');
+    const message = missing ? '任务控制接口未找到，请重启控制台服务' : d.error || d.failure?.summary || raw.trim() || `请求失败（${response.status}）`;
+    throw new Error(message);
+  }
+  return d;
+}
+function taskApi(path, payload) {
+  return fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload || {})}).then(readTaskResponse);
+}
+async function loadTaskControl() {
+  const box = $('taskControlList'); if (!box) return;
+  const filter = $('taskStatusFilter') ? $('taskStatusFilter').value : '';
+  const project = currentProjectName || $('projectName')?.value.trim() || '';
+  try {
+    const r = await fetch(`/api/tasks/control?project=${encodeURIComponent(project)}&status=${encodeURIComponent(filter)}`);
+    const d = await readTaskResponse(r);
+    taskControlCache = d.tasks || [];
+    const s = d.server || {}, online = Boolean(s.server && !s.error);
+    $('taskServerSummary').innerHTML = `<span>服务器：<strong>${esc(online ? s.server : '离线')}</strong></span><span>显卡：<strong>${esc(s.gpu_name || '未知')}</strong></span><span>可用显存：<strong>${s.vram_free == null ? '未知' : esc(Math.round(Number(s.vram_free) / 1048576) + ' MB')}</strong></span><span>队列：<strong>${esc((s.queue_running || 0) + ' 个运行中 / ' + (s.queue_pending || 0) + ' 个等待中')}</strong></span>`;
+    renderTaskControl();
+  } catch (e) {
+    $('taskServerSummary').innerHTML = `<span>服务器：<strong style="color:var(--red)">离线</strong></span><span class="hint">${esc(e.message)}</span>`;
+    box.innerHTML = `<div class="empty">任务控制中心不可用：${esc(e.message)}</div>`;
+  }
+}
+function renderTaskControl() {
+  const box = $('taskControlList'); if (!box) return;
+  if (!taskControlCache.length) { box.innerHTML = '<div class="empty">暂无规范化任务尝试记录。</div>'; return; }
+  box.innerHTML = taskControlCache.map(group => {
+    const t = group.latest || {}, status = t.status || '', failure = taskFailureText(t.failure), p = taskParams(t), active = TASK_ACTIVE_STATUSES.has(status), terminal = TASK_TERMINAL_STATUSES.has(status), actions = [];
+    actions.push(`<button class="btn" onclick="openTaskAttempt('${escAttr(t.attempt_id)}')">详情</button>`);
+    if (status === 'blocked') actions.push(`<button class="btn blue" onclick="openTaskAttempt('${escAttr(t.attempt_id)}')">解析链式依赖</button>`);
+    if (status === 'preflight_pending' || status === 'preflight_failed') actions.push(`<button class="btn" onclick="preflightTaskAttempt('${escAttr(t.attempt_id)}')">预检</button>`);
+    if (status === 'ready') actions.push(`<button class="btn blue" onclick="submitTaskAttempt('${escAttr(t.attempt_id)}')">提交</button>`);
+    if (terminal) actions.push(`<button class="btn" style="color:var(--blue)" onclick="retryTaskAttempt('${escAttr(t.attempt_id)}')">重新生成本段</button>`);
+    if (active) actions.push(`<button class="btn" style="color:var(--red)" onclick="cancelTaskAttempt('${escAttr(t.attempt_id)}')">取消</button>`);
+    const count = (group.history || []).length;
+    return `<div class="task-control-item"><div class="r1"><span class="name">${esc(t.segment_key || t.attempt_id)}</span><span class="pill ${escAttr(status)}">${esc(taskLabel(status))}</span></div><div class="meta">尝试 ${esc(t.attempt_id)} · ${esc(t.kind || 'video')} · 创建于 ${esc(t.created_at || '')}</div><div class="task-summary"><span>MP：<strong>${esc(p.mp ?? '默认')}</strong></span><span>步数：<strong>${esc(p.steps ?? '默认')}</strong></span><span>时长：<strong>${esc(p.duration ?? '默认')} 秒</strong></span><span>历史记录：<strong>${count}</strong></span></div>${failure ? `<div class="failure">${esc(failure)}</div>` : ''}<div class="actions">${actions.join('')}</div>${count > 1 ? `<div class="history">已保留 ${count} 次尝试；重试会创建新的子任务。</div>` : ''}</div>`;
+  }).join('');
+}
+function fillTaskPredecessors(current) {
+  const opts = ['<option value="">选择已成功的前置段</option>'];
+  taskControlCache.forEach(group => { const t = group.latest || {}; if (t.attempt_id !== (current && current.attempt_id) && t.status === 'succeeded') opts.push(`<option value="${escAttr(t.attempt_id)}">${esc(t.segment_key || t.attempt_id)} · ${esc(t.attempt_id)}</option>`); });
+  $('taskRetryPredecessor').innerHTML = opts.join('');
+}
+async function openTaskAttempt(attemptId) {
+  try {
+    const r = await fetch(`/api/task/attempt?attempt_id=${encodeURIComponent(attemptId)}`), d = await readTaskResponse(r);
+    taskControlAttempt = d.attempt; const t = taskControlAttempt, p = taskParams(t), failure = taskFailureText(t.failure);
+    $('taskDetailTitle').textContent = `${t.segment_key || t.attempt_id} · ${taskLabel(t.status)}`;
+    $('taskDetailMeta').textContent = `尝试 ${t.attempt_id} · 服务器 ${t.server_url || '未知'} · Prompt ID ${t.prompt_id || '未提交'}`;
+    $('taskFailureDetail').textContent = failure; $('taskFailureDetail').style.display = failure ? 'block' : 'none';
+    $('taskAttemptHistory').textContent = t.parent_attempt_id ? `这是 ${t.parent_attempt_id} 的子任务，原任务保持不变。` : '原始任务尝试。';
+    $('taskRetryMp').value = String(p.mp ?? '0.4'); $('taskRetrySteps').value = String(p.steps ?? '20'); $('taskRetryDuration').value = String(p.duration ?? 5);
+    $('taskRetryChain').checked = Boolean(p.chain_mode || p.chain_retry || (p.chain_prev && p.chain_prev !== true)); fillTaskPredecessors(t); if (typeof p.chain_prev === 'string') $('taskRetryPredecessor').value = p.chain_prev;
+    $('btnTaskRetrySubmit').style.display = TASK_TERMINAL_STATUSES.has(t.status) ? '' : 'none'; $('btnTaskPreflight').style.display = ['preflight_pending','preflight_failed'].includes(t.status) ? '' : 'none'; $('btnTaskResolveChain').style.display = t.status === 'blocked' ? '' : 'none';
+    $('taskDetailModalBg').style.display = 'flex';
+  } catch (e) { toast(`加载任务尝试失败：${e.message}`, true); }
+}
+async function preflightTaskAttempt(attemptId) {
+  const id = attemptId || (taskControlAttempt && taskControlAttempt.attempt_id); if (!id) return;
+  try { const d = await taskApi('/api/task/preflight', {attempt_id:id}); toast(d.severity === 'block' ? `预检阻塞：${taskFailureText(d.failure)}` : d.severity === 'warning' ? `预检警告：${(d.warnings || []).map(x => x.summary || x.code).join('、')}` : '预检通过', d.severity === 'block'); await loadTaskControl(); } catch (e) { toast(`预检失败：${e.message}`, true); }
+}
+async function submitTaskAttempt(attemptId, confirmWarnings) {
+  const id = attemptId || (taskControlAttempt && taskControlAttempt.attempt_id); if (!id) return;
+  try { const d = await taskApi('/api/task/submit', {attempt_id:id, confirm_warnings:Boolean(confirmWarnings)}); if (d.confirmation_required) { askConfirm('预检有警告，仍要提交吗？', () => submitTaskAttempt(id, true)); return; } toast('任务已提交到 ComfyUI'); await loadTaskControl(); } catch (e) { toast(`提交失败：${e.message}`, true); }
+}
+async function retryTaskAttempt(attemptId) {
+  if (attemptId && (!taskControlAttempt || taskControlAttempt.attempt_id !== attemptId)) { await openTaskAttempt(attemptId); return; }
+  const t = taskControlAttempt; if (!t) return; const chain = $('taskRetryChain').checked, predecessor = $('taskRetryPredecessor').value;
+  if (chain && !predecessor) { toast('请选择已成功的前置段，或取消链式重试。', true); return; }
+  const overrides = {mp:parseFloat($('taskRetryMp').value), steps:parseInt($('taskRetrySteps').value,10), duration:parseInt($('taskRetryDuration').value,10), chain_mode:chain}; if (chain) overrides.chain_prev = predecessor;
+  try { await taskApi('/api/task/retry', {attempt_id:t.attempt_id, overrides}); $('taskDetailModalBg').style.display = 'none'; toast('新的重试任务已创建，请先运行预检，再明确提交。'); await loadTaskControl(); } catch (e) { toast(`重试失败：${e.message}`, true); }
+}
+async function cancelTaskAttempt(attemptId, confirmInterrupt) {
+  try { const d = await taskApi('/api/task/cancel', {attempt_id:attemptId, confirm_interrupt:Boolean(confirmInterrupt)}); if (d.confirmation_required) { askConfirm(`确定要中断运行中的任务 ${d.task_name || attemptId} 吗？`, () => cancelTaskAttempt(attemptId, true)); return; } toast('已请求取消任务'); await loadTaskControl(); } catch (e) { toast(`取消失败：${e.message}`, true); }
+}
+async function cancelCurrentBatch() {
+  const ids = [...new Set(taskControlCache.map(x => x.latest && x.latest.batch_id).filter(Boolean))]; if (!ids.length) { toast('没有找到活动批次。', true); return; }
+  askConfirm(`确定要取消 ${ids.length} 个活动批次吗？`, async () => { try { for (const batch_id of ids) await taskApi('/api/batch/cancel', {batch_id, cancel_running:false}); toast('已取消排队中的任务。'); await loadTaskControl(); } catch (e) { toast(`取消批次失败：${e.message}`, true); } });
+}
+async function resolveBlockedChain(attemptId) {
+  const id = attemptId || (taskControlAttempt && taskControlAttempt.attempt_id); if (!id) return; const useChain = $('taskRetryChain').checked, predecessor = $('taskRetryPredecessor').value;
+  if (useChain && !predecessor) { toast('请先选择已成功的前置段。', true); return; }
+  try { await taskApi('/api/task/resolve_chain', {attempt_id:id, predecessor_attempt_id:useChain ? predecessor : null, disable_chain:!useChain}); toast('链式依赖已解析，请运行预检后再提交。'); await loadTaskControl(); openTaskAttempt(id); } catch (e) { toast(`解析链式依赖失败：${e.message}`, true); }
+}
+
 async function refreshRecords() {
   try {
     const r = await fetch('/api/records');
@@ -1879,8 +2127,49 @@ async function checkLlm() {
 
 // ---------- 模型配置（本地/云端） ----------
 function toggleCfgBoxes() {
-  $('llmCloudBox').style.display = $('llmProvider').value === 'cloud' ? '' : 'none';
-  $('imgCloudBox').style.display = $('imgProvider').value === 'cloud' ? '' : 'none';
+  const llmCloud = $('llmProvider').value === 'cloud';
+  $('llmCloudBox').style.display = llmCloud ? '' : 'none';
+  $('llmLocalBox').style.display = llmCloud ? 'none' : '';
+  const legacyComfy = $('imgProvider').value === 'cloud' && $('imgProviderType').value === 'comfyui';
+  if (legacyComfy) $('imgProvider').value = 'comfyui';
+  const provider = $('imgProvider').value;
+  const cloud = provider === 'cloud';
+  $('imgCloudBox').style.display = cloud ? '' : 'none';
+  $('imgLocalBox').style.display = provider === 'local' ? '' : 'none';
+  $('imgComfyuiBox').style.display = provider === 'comfyui' ? '' : 'none';
+  $('imgProviderTypeRow').style.display = cloud ? '' : 'none';
+  if (!cloud) $('imgProviderType').value = 'openai';
+}
+function syncImageModelControls(model, providerType) {
+  const type = providerType || $('imgProviderType').value || 'openai';
+  Array.from($('imgCloudModelSelect').options).forEach(option => {
+    option.hidden = option.value !== '__custom__' && option.dataset.provider !== type;
+  });
+  const value = model || $('imgCloudModel').value || '';
+  const known = Array.from($('imgCloudModelSelect').options).some(o => !o.hidden && o.value === value);
+  $('imgCloudModelSelect').value = known ? value : '__custom__';
+  $('imgCloudModel').style.display = known ? 'none' : '';
+  if (known && value !== '__custom__') $('imgCloudModel').value = value;
+}
+function selectedImageModel() {
+  return $('imgCloudModelSelect').value === '__custom__' ? $('imgCloudModel').value.trim() : $('imgCloudModelSelect').value;
+}
+async function collectConfigFromForm() {
+  const cfg = await (await fetch('/api/config')).json();
+  cfg.comfyui = cfg.comfyui || {};
+  cfg.comfyui.server = $('serverInput').value.trim();
+  cfg.llm = cfg.llm || {};
+  cfg.llm.provider = $('llmProvider').value;
+  cfg.llm.provider_type = $('llmProviderType').value;
+  cfg.llm.local = Object.assign({}, cfg.llm.local, {url:$('llmLocalUrl').value.trim(), model:$('llmLocalModel').value.trim()});
+  cfg.llm.cloud = Object.assign({}, cfg.llm.cloud, {base_url:$('llmCloudUrl').value.trim(), model:$('llmCloudModel').value.trim(), api_key:$('llmCloudKey').value.trim()});
+  cfg.image_gen = cfg.image_gen || {};
+  cfg.image_gen.provider = $('imgProvider').value;
+  cfg.image_gen.provider_type = cfg.image_gen.provider === 'cloud' ? $('imgProviderType').value : (cfg.image_gen.provider === 'comfyui' ? 'comfyui' : 'openai');
+  cfg.image_gen.local = Object.assign({}, cfg.image_gen.local, {url:$('imgLocalUrl').value.trim()});
+  cfg.image_gen.cloud = Object.assign({}, cfg.image_gen.cloud, {base_url:$('imgCloudUrl').value.trim(), model:selectedImageModel(), api_key:$('imgCloudKey').value.trim()});
+  cfg.image_gen.comfyui = Object.assign({}, cfg.image_gen.comfyui, {server:$('serverInput').value.trim(), checkpoint:$('imgComfyuiCheckpoint').value.trim()});
+  return cfg;
 }
 
 async function loadConfigIntoForm() {
@@ -1902,14 +2191,16 @@ async function loadConfigIntoForm() {
       if (llm.cloud.api_key) $('llmCloudKey').value = llm.cloud.api_key;
     }
     const img = c.image_gen || {};
-    $('imgProvider').value = img.provider || 'local';
-    if (img.provider_type) $('imgProviderType').value = img.provider_type;
+    const legacyComfy = img.provider === 'cloud' && img.provider_type === 'comfyui';
+    $('imgProvider').value = legacyComfy ? 'comfyui' : (img.provider || 'local');
+    if (img.provider_type && !legacyComfy) $('imgProviderType').value = img.provider_type;
     if (img.local && img.local.url) $('imgLocalUrl').value = img.local.url;
     if (img.cloud) {
       if (img.cloud.base_url) $('imgCloudUrl').value = img.cloud.base_url;
-      if (img.cloud.model) $('imgCloudModel').value = img.cloud.model;
+      if (img.cloud.model) { $('imgCloudModel').value = img.cloud.model; syncImageModelControls(img.cloud.model); }
       if (img.cloud.api_key) $('imgCloudKey').value = img.cloud.api_key;
     }
+    if (img.comfyui && img.comfyui.checkpoint) $('imgComfyuiCheckpoint').value = img.comfyui.checkpoint;
     const r2v = (c.models && c.models.r2v) || {};
     if (r2v.unet) $('r2vUnet').value = r2v.unet;
     if (r2v.clip) $('r2vClip').value = r2v.clip;
@@ -1937,14 +2228,15 @@ async function saveConfig() {
     };
     cfg.image_gen = {
       provider: $('imgProvider').value,
-      provider_type: $('imgProviderType').value,
+      provider_type: $('imgProvider').value === 'cloud' ? $('imgProviderType').value : ($('imgProvider').value === 'comfyui' ? 'comfyui' : 'openai'),
       local: {url: $('imgLocalUrl').value.trim()},
       cloud: {
         enabled: true,
         base_url: $('imgCloudUrl').value.trim(),
         api_key: $('imgCloudKey').value.trim(),
-        model: $('imgCloudModel').value.trim(),
+        model: selectedImageModel(),
       },
+      comfyui: Object.assign({}, (cur.image_gen && cur.image_gen.comfyui) || {}, {server: $('serverInput').value.trim(), checkpoint: $('imgComfyuiCheckpoint').value.trim()}),
     };
     cfg.models = cfg.models || {};
     cfg.models.r2v = {
@@ -2817,6 +3109,155 @@ $('btnConfirmScript').addEventListener('click', confirmScript);
 $('btnBuildPrompts').addEventListener('click', buildPrompts);
 $('btnSubmit').addEventListener('click', submit);
 $('btnRefreshStatus').addEventListener('click', refreshStatus);
+$('btnTaskControlRefresh').addEventListener('click', loadTaskControl);
+$('taskStatusFilter').addEventListener('change', loadTaskControl);
+$('btnCancelBatch').addEventListener('click', cancelCurrentBatch);
+$('btnTaskRetrySubmit').addEventListener('click', () => retryTaskAttempt());
+$('btnTaskPreflight').addEventListener('click', () => preflightTaskAttempt());
+$('btnTaskResolveChain').addEventListener('click', () => resolveBlockedChain());
+async function diagnosticQuick() {
+  const service = $('diagnosticService').value;
+  const box = $('diagnosticResult'); box.textContent = '检查中…';
+  try {
+    const r = await fetch('/api/diagnostics/quick?service=' + encodeURIComponent(service));
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || '检查失败');
+    box.textContent = `${d.status || ''}：${d.summary || ''}`;
+  } catch (e) { box.textContent = '检查失败：' + e.message; }
+}
+async function diagnosticReal() {
+  const service = $('diagnosticService').value;
+  const cost = $('diagnosticCostConfirm').checked, gpu = $('diagnosticGpuConfirm').checked;
+  const box = $('diagnosticResult'); box.textContent = '提交测试中…';
+  try {
+    const r = await fetch('/api/diagnostics/real', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({service, confirm_cost:cost, confirm_gpu:gpu})});
+    const d = await r.json(); if (!r.ok) throw new Error(r.status === 404 ? '控制台后端未加载诊断接口，请重启控制台服务' : (d.error || '提交失败'));
+    box.textContent = '已提交，等待结果…';
+    const poll = async () => {
+      const q = await fetch('/api/diagnostics/run?run_id=' + encodeURIComponent(d.run_id));
+      const x = await q.json();
+      if (x.status === 'running') return setTimeout(poll, 1500);
+      box.textContent = x.status === 'succeeded' ? `测试成功：${x.result?.filename || x.result?.response || '服务可用'}` : `测试失败：${x.failure?.summary || '未知错误'}`;
+    }; poll();
+  } catch (e) { box.textContent = '测试失败：' + e.message; }
+}
+let llmChatHistory = [];
+function renderLlmChat() {
+  const box = $('llmChatMessages');
+  if (!box) return;
+  box.innerHTML = '';
+  llmChatHistory.forEach(item => {
+    const node = document.createElement('div');
+    node.className = `llm-chat-message ${item.role}`;
+    node.textContent = item.content;
+    box.appendChild(node);
+  });
+  box.scrollTop = box.scrollHeight;
+}
+function openLlmChat() {
+  llmChatHistory = [];
+  renderLlmChat();
+  $('llmChatPanel').style.display = '';
+  $('llmChatHint').textContent = '当前使用设置页中填写的 LLM 配置；未保存的地址、模型也会立即用于本次测试。';
+  $('llmChatInput').focus();
+}
+function closeLlmChat() {
+  $('llmChatPanel').style.display = 'none';
+  llmChatHistory = [];
+}
+async function sendLlmChat() {
+  const input = $('llmChatInput');
+  const send = $('btnLlmChatSend');
+  const message = input.value.trim();
+  if (!message || send.disabled) return;
+  const previous = llmChatHistory.slice();
+  llmChatHistory.push({role: 'user', content: message});
+  renderLlmChat();
+  input.value = '';
+  send.disabled = true;
+  $('llmChatHint').textContent = '正在等待 LLM 回复…';
+  try {
+    const cfg = await collectConfigFromForm();
+    const r = await fetch('/api/llm/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message, history: previous, config: cfg, confirm_cost: true}),
+    });
+    const raw = await r.text();
+    let data;
+    try { data = JSON.parse(raw); } catch (_) { throw new Error(raw.slice(0, 300) || `HTTP ${r.status}`); }
+    if (!r.ok) throw new Error(r.status === 404 ? '控制台后端未加载聊天接口，请重启控制台服务' : (data.error || `HTTP ${r.status}`));
+    llmChatHistory.push({role: 'assistant', content: data.response || 'LLM 返回为空'});
+    $('llmChatHint').textContent = data.model ? `模型：${data.model}` : '对话完成';
+    renderLlmChat();
+  } catch (e) {
+    llmChatHistory = previous;
+    renderLlmChat();
+    $('llmChatHint').textContent = '发送失败：' + e.message;
+  } finally {
+    send.disabled = false;
+    input.focus();
+  }
+}
+async function runInlineDiagnostic(button) {
+  const service = button.dataset.diagnostic;
+  const action = button.dataset.diagnosticAction;
+  const target = service === 'comfyui_r2v' ? $('diagR2v') : service.startsWith('comfyui_') ? $('diagComfyuiVideo') : ($('diag' + service.replace(/^comfyui$/, 'Comfyui').replace(/^agnes$/, 'Agnes').replace(/^llm$/, 'Llm')) || button.nextElementSibling);
+  if (service === 'llm' && action === 'real') {
+    if (!confirm('真实对话可能产生费用，确定继续吗？')) return;
+    openLlmChat();
+    return;
+  }
+  if (action === 'real' && !confirm('真实测试可能产生费用或占用 GPU，确定继续吗？')) return;
+  if (target) target.textContent = '测试中…';
+  try {
+    const cfg = await collectConfigFromForm();
+    const url = action === 'quick' ? '/api/diagnostics/quick' : '/api/diagnostics/real';
+    const r = await fetch(url, {method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({service, config:cfg, confirm_cost:true, confirm_gpu:true})});
+    const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { throw new Error(raw.slice(0, 300) || `HTTP ${r.status}`); }
+    if (!r.ok) throw new Error(r.status === 404 ? '控制台后端未加载诊断接口，请重启控制台服务' : (d.error || d.message || `HTTP ${r.status}`));
+    if (action === 'quick') {
+      const detail = d.details?.error
+        ? `（${d.details.error}）`
+        : d.details?.check
+          ? `（检查：${d.details.check}${d.details.endpoint ? ' · ' + d.details.endpoint : ''}）`
+          : '';
+      if (target) target.textContent = `${d.status || ''}：${d.summary || '检查完成'}${detail}`;
+      return;
+    }
+    if (!d.run_id) throw new Error('服务未返回诊断任务 ID');
+    if (target) target.textContent = `已提交测试，正在验证输出（${d.run_id}）`;
+    const poll = async () => {
+      try {
+        const q = await fetch('/api/diagnostics/run?run_id=' + encodeURIComponent(d.run_id));
+        const pollRaw = await q.text(); let x;
+        try { x = JSON.parse(pollRaw); } catch (_) { throw new Error(pollRaw.slice(0, 300) || `HTTP ${q.status}`); }
+        if (!q.ok) throw new Error(x.error || x.message || `HTTP ${q.status}`);
+        if (x.status === 'running') {
+          if (target) target.textContent = `执行中，正在验证输出（${d.run_id}）`;
+          setTimeout(poll, 1500);
+          return;
+        }
+        if (x.status === 'succeeded') {
+          const output = x.result?.filename || x.result?.path || x.result?.url || x.result?.response || '服务可用';
+          if (target) target.textContent = `测试成功：${output}`;
+          return;
+        }
+        if (target) target.textContent = `测试失败：${x.failure?.summary || x.summary || '未知错误'}`;
+      } catch (e) {
+        if (target) target.textContent = '测试失败：' + e.message;
+      }
+    };
+    poll();
+  } catch (e) { if (target) target.textContent = '测试失败：' + e.message; }
+}
+document.querySelectorAll('[data-diagnostic]').forEach(btn => btn.addEventListener('click', () => runInlineDiagnostic(btn)));
+$('btnLlmChatSend').addEventListener('click', sendLlmChat);
+$('btnLlmChatClose').addEventListener('click', closeLlmChat);
+$('llmChatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendLlmChat(); }
+});
+$('btnTaskRetryCancel').addEventListener('click', () => { $('taskDetailModalBg').style.display = 'none'; taskControlAttempt = null; });
+$('taskDetailModalBg').addEventListener('click', e => { if (e.target === $('taskDetailModalBg')) { $('taskDetailModalBg').style.display = 'none'; taskControlAttempt = null; } });
 $('btnApplyMp').addEventListener('click', applyMpAll);
 $('btnAssemble').addEventListener('click', assemble);
 $('btnPickVersions').addEventListener('click', loadAssembleVersions);
@@ -2855,7 +3296,18 @@ $('qualityMode').addEventListener('change', () => {
   autoSaveProject(true);
 });
 $('llmProvider').addEventListener('change', toggleCfgBoxes);
-$('imgProvider').addEventListener('change', toggleCfgBoxes);
+$('imgProvider').addEventListener('change', () => { toggleCfgBoxes(); syncImageModelControls(); });
+$('imgCloudModelSelect').addEventListener('change', () => {
+  const custom = $('imgCloudModelSelect').value === '__custom__';
+  $('imgCloudModel').style.display = custom ? '' : 'none';
+  if (!custom) $('imgCloudModel').value = $('imgCloudModelSelect').value;
+});
+$('imgProviderType').addEventListener('change', () => {
+  const type = $('imgProviderType').value;
+  if (type === 'comfyui') $('imgProvider').value = 'comfyui';
+  else syncImageModelControls(type === 'agnes' ? 'agnes-image-2.5-flash' : type === 'dashscope' ? 'wanx-v1' : 'gpt-image-1', type);
+  toggleCfgBoxes();
+});
 $('btnGenAllAssets').addEventListener('click', genAllAssets);
 $('btnReverifyAssets').addEventListener('click', reverifyAssets);
 $('btnUploadVideo').addEventListener('click', () => $('videoUpload').click());

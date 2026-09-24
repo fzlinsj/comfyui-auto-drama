@@ -5,6 +5,212 @@
 
 ---
 
+## 2026-09-24 - v0.13.37 - Windows 启动脚本清理旧控制台
+### 本次更新内容
+
+- `scripts/start_windows.bat` 启动前只清理占用 `8890` 控制台端口的旧进程，避免更新代码后浏览器仍连接旧版后端。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_windows_launcher -v`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 启动脚本不会结束 ComfyUI `6006` 或其他端口的服务，只处理控制台 `8890`。
+- 已打开的旧控制台窗口再次启动时，会自动替换为当前代码版本。
+
+## 2026-09-24 - v0.13.36 - LLM 检查详情与交互对话
+### 本次更新内容
+
+- “免费检查 LLM”明确检查 `GET /models`，结果显示实际端点、提供商格式、当前模型和上游错误原因；HTTP 错误正文会脱敏 API Key 后返回。
+- “真实对话测试”改为设置页内置一问一答面板，支持多轮历史、当前未保存表单配置即时生效、发送中禁用按钮和错误提示。
+- 新增 `/api/llm/chat` 交互接口，要求明确确认可能产生费用，并校验消息内容与历史长度，避免确认后窗口直接消失。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_service_diagnostics console.tests.test_settings_diagnostics_ui console.tests.test_task_control_api -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `node --check`（提取后的前端脚本）
+- `git diff --check`
+
+### 影响与注意事项
+
+- 免费检查只访问模型列表，不发送对话或生图请求；真实对话仍可能产生 LLM 费用。
+- 代码更新后需重启 `console/start_daemons.py`，浏览器使用 `Ctrl+F5` 加载新的聊天接口和页面。
+
+## 2026-09-24 - v0.13.35 - 诊断接口未重启提示
+### 本次更新内容
+
+- 设置页真实诊断遇到 HTTP 404 时，明确提示“控制台后端未加载诊断接口，请重启控制台服务”，不再只显示 `not found`。
+- 保留真实上游错误内容，便于区分后端未更新与云端接口/模型本身的问题。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_settings_diagnostics_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `node --check`（提取后的前端脚本）
+- `git diff --check`
+
+### 影响与注意事项
+
+- 本次截图对应的是旧后端进程返回 404；必须重启 `console/start_daemons.py` 后，`/api/diagnostics/real` 才会生效。
+
+## 2026-09-24 - v0.13.34 - 设置项按提供商条件显示
+### 本次更新内容
+
+- 生图设置按本地、云端、ComfyUI 分组显示，只展示当前提供商需要的参数。
+- 云端接口格式仅在云端模式显示，模型下拉按 OpenAI/Agnes 提供商过滤；ComfyUI 模式显示 SDXL 检查点配置。
+- 语言模型设置同步按本地/云端显示，修复“云端接口格式”标签在窄抽屉中被挤成竖排的问题。
+- 兼容旧配置：检测到“云端 + ComfyUI 格式”时自动迁移为 ComfyUI 生图模式。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_settings_diagnostics_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `node --check`（提取后的前端脚本）
+- `git diff --check`
+
+### 影响与注意事项
+
+- 保存配置时仍保留旧版 `provider/provider_type` 字段，现有后端配置兼容不受影响。
+- 选择 ComfyUI 生图时，检查点留空会使用后端默认的 `sd_xl_base_1.0.safetensors`。
+
+## 2026-09-24 - v0.13.33 - 真实诊断结果轮询修复
+### 本次更新内容
+
+- 设置页真实测试提交后持续轮询 `/api/diagnostics/run`，显示执行中、成功输出路径或失败摘要。
+- ComfyUI 生图、T2V、I2V、R2V 诊断分别写入对应结果区域，避免提交后界面停留在“已提交”。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_settings_diagnostics_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 真实测试仍可能消耗 Agnes 费用或 ComfyUI GPU；结果会在任务完成后显示具体输出或失败原因。
+- 修改前端后需重启 `console/start_daemons.py` 以加载新页面。
+
+## 2026-09-24 - v0.13.32 - 生图提供商选择与诊断布局
+### 本次更新内容
+
+- ComfyUI 诊断按钮按连接、生图、视频分组并统一显示执行结果。
+- 生图配置支持 OpenAI、Agnes、Boogu 和 ComfyUI 提供商选择；云端模型提供常用预设和自定义模型。
+- 真实诊断提交后轮询最终状态并显示输出验证结果。
+### 验证方式
+
+- `python -m unittest console.tests.test_settings_diagnostics_ui console.tests.test_service_diagnostics -v`
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `git diff --check`
+### 影响与注意事项
+
+- 真实生图/视频测试仍可能产生云端费用或占用 GPU。
+- 旧版 `image_gen.local/cloud/provider_type` 配置保持兼容。
+
+
+## 2026-09-24 - v0.13.31 - 配置区服务诊断
+
+### 本次更新内容
+
+- 服务诊断从第 7 步移入设置抽屉，分别紧贴 ComfyUI、LLM、生图和 R2V 配置。
+- 测试请求读取当前表单值，即使尚未保存也能验证；生图测试根据当前本地/云端供应商选择适配器。
+- 诊断错误改为先读取原始响应，再解析 JSON，服务端返回 HTML 或纯文本时显示可读错误。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_settings_diagnostics_ui console.tests.test_service_diagnostics -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 第 7 步不再显示诊断卡片；打开右上角“设置”即可测试配置。
+- 真实生图/视频测试仍可能产生费用或占用 GPU，点击后会再次确认。
+
+## 2026-09-24 - v0.13.30 - 服务诊断与单项真实测试
+
+### 本次更新内容
+
+- 新增 `/api/diagnostics/quick` 免费连通性检查、`/api/diagnostics/real` 单项真实测试和 `/api/diagnostics/run` 结果轮询接口。
+- 控制台新增服务诊断面板，可分别测试 Agnes 生图、LLM、ComfyUI 生图及 T2V/I2V/R2V，真实测试必须明确确认费用或 GPU 使用。
+- 诊断结果写入 `console.db`，服务重启后仍可查询，失败信息沿用失败码并脱敏 API Key。
+
+### 验证方式
+
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 免费检查不会提交生图或视频任务；真实测试可能消耗 Agnes 费用或 ComfyUI GPU，需在界面勾选确认。
+- 修改后需重启 `console/start_daemons.py` 才能加载新的后端路由。
+
+## 2026-09-24 - v0.13.29 - 链式重试自动恢复前置末帧
+
+### 本次更新内容
+
+- **末帧持久化**：链式生成完成后，将抽取的末帧保存到配置的素材目录，不再只依赖临时文件。
+- **失败重试恢复**：旧批量提交和任务控制中心的“重新生成本段”都会在提交前检查链式首帧；素材缺失时自动从已成功的前置视频重新抽取、保存并上传。
+- **明确阻塞原因**：找不到前置尝试或前置视频/末帧无法恢复时，预检记录 `F-CHAIN-PREDECESSOR-MISSING` 或 `F-CHAIN-FRAME-MISSING`，不再进入无限等待。
+- **可再次预检**：`preflight_failed` 任务修复服务器、输出或素材后，可以直接再次运行预检，不需要删除重建记录。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_task_service console.tests.test_chain_resume console.tests.test_task_control_chain -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/batch_console.py console/task_service.py console/task_store.py console/chain_daemon.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 仅影响链式任务的末帧保存、重试预检和提交前素材准备；普通 T2V/I2V/R2V 参数不变。
+- 代码更新后需重启 `console/start_daemons.py`。现有失败任务可在任务控制中心创建重试，选择已成功的前置段，运行预检通过后再提交。
+
+## 2026-09-24 - v0.13.28 - 任务控制中心中文化与接口错误提示修复
+
+### 本次更新内容
+
+- **界面中文化**：任务控制中心的标题、状态、按钮、详情弹窗、重试参数、链式依赖、确认提示和失败提示统一改为中文；任务 ID、Prompt ID、GPU 型号、文件名和节点名等技术标识保持原文。
+- **响应解析保护**：任务控制中心先读取响应文本，再尝试解析 JSON；接口返回纯文本 404 或非 JSON 错误时显示明确的中文提示，不再出现 `Unexpected token`。
+- **后端错误格式统一**：未匹配的 GET/POST 路由统一返回 JSON 错误对象，便于前端和其他客户端稳定处理。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_task_control_ui console.tests.test_task_control_api -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/batch_console.py console/task_service.py console/task_store.py console/chain_daemon.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 仅影响任务控制中心的显示文案与错误处理，不改变任务提交、重试、取消和链式依赖的业务流程。
+- 代码更新后需重启 `console/start_daemons.py`，让运行中的控制台进程加载新的路由和页面代码。
+
+## 2026-09-24 - v0.13.27 - 任务控制中心支持远端离线降级
+
+### 本次更新内容
+
+- **离线任务控制**：任务控制中心先读取本地规范化任务记录；ComfyUI 服务器离线时仍返回任务列表，并在服务器摘要中明确显示离线原因。
+- **预检恢复**：允许 `preflight_failed` 尝试在服务器或工作流修复后重新预检并恢复为 `ready`，不需要手工删除旧记录。
+- **项目隔离**：任务控制中心按当前项目名过滤规范化尝试，避免不同项目的分段混入同一列表。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_task_service.TaskServiceTests.test_failed_preflight_can_be_run_again_after_server_is_fixed console.tests.test_task_control_api -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/task_service.py console/task_store.py console/batch_console.py console/chain_daemon.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 服务器离线只会阻止预检、提交和刷新等远端操作，不会隐藏本地任务历史；不会自动提交、重试或切换供应商。
+
 ## 2026-09-24 - v0.13.26 - 增加可控任务生命周期与链式刷新
 ### 本次更新内容
 

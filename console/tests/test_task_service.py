@@ -78,6 +78,27 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(result["failure"]["code"], "F-MODEL-MISSING")
         self.assertEqual(self.client.submitted_graphs, [])
 
+    def test_failed_preflight_can_be_run_again_after_server_is_fixed(self):
+        attempt_id = self._create("preflight_failed", failure={"code": "F-MODEL-MISSING"})
+        result = self.service.preflight_attempt(attempt_id)
+        self.assertEqual(result["status"], "ready")
+        self.assertIsNone(result["failure"])
+
+    def test_failed_preflight_can_fail_again_without_illegal_transition(self):
+        attempt_id = self._create("preflight_failed", failure={"code": "F-MODEL-MISSING"})
+        self.client.preflight_result = {"ok": False, "missing_nodes": ["MissingNode"], "missing_models": [], "warnings": []}
+
+        result = self.service.preflight_attempt(attempt_id)
+
+        self.assertEqual(result["status"], "preflight_failed")
+        self.assertEqual(result["failure"]["code"], "F-NODE-MISSING")
+
+    def test_control_tasks_are_filtered_by_project(self):
+        self._create(segment_key="episode_a", project_name="project-a")
+        self._create(segment_key="episode_b", project_name="project-b")
+        tasks = self.service.list_control_tasks("project-a")
+        self.assertEqual([item["segment_key"] for item in tasks], ["episode_a"])
+
     def test_two_successful_missing_polls_mark_attempt_stale(self):
         attempt_id = self._create("queued", prompt_id="queued-prompt")
         self.service.refresh_attempt(attempt_id)
@@ -94,10 +115,11 @@ class TaskServiceTests(unittest.TestCase):
         self.assertEqual(self.store.get_attempt(attempt_id)["missing_poll_count"], 0)
 
     def test_retry_creates_child_attempt_and_does_not_mutate_failed_parent(self):
-        parent_id = self._create("failed", parameters={"mp": 1.0, "steps": 8, "graph": {}})
+        parent_id = self._create("failed", parameters={"legacy": {"id": "legacy-id"}, "mp": 1.0, "steps": 8, "graph": {}})
         child = self.service.retry_attempt(parent_id, {"mp": 0.4, "steps": 4})
         self.assertEqual(child["parent_attempt_id"], parent_id)
         self.assertEqual(child["parameters"]["mp"], 0.4)
+        self.assertEqual(child["parameters"]["legacy"], {"id": "legacy-id"})
         self.assertEqual(self.store.get_attempt(parent_id)["status"], "failed")
 
     def test_cancel_pending_deletes_only_requested_prompt(self):

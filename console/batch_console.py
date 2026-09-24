@@ -11,6 +11,7 @@
 """
 
 import base64
+import copy
 import csv
 import hashlib
 import io
@@ -35,11 +36,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 try:
     from .comfyui_client import ComfyUIClient
     from .task_store import TaskStore
-    from .task_service import TaskService
+    from .task_service import TaskPreparationError, TaskService
+    from .service_diagnostics import ServiceDiagnostics, SERVICES
+    from workflows.build_sdxl_graph import build_sdxl_graph
 except ImportError:
     from comfyui_client import ComfyUIClient
     from task_store import TaskStore
-    from task_service import TaskService
+    from task_service import TaskPreparationError, TaskService
+    from service_diagnostics import ServiceDiagnostics, SERVICES
+    from workflows.build_sdxl_graph import build_sdxl_graph
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)  # 项目根（config.json 所在目录）
@@ -155,6 +160,7 @@ PROGRESS_LABELS = [
 
 lock = threading.Lock()
 _TASK_STORE = None
+_SERVICE_DIAGNOSTICS = None
 
 
 def get_task_store():
@@ -166,7 +172,43 @@ def get_task_store():
 
 
 def get_task_service():
-    return TaskService(get_task_store(), lambda server: ComfyUIClient(server))
+    return TaskService(
+        get_task_store(),
+        lambda server: ComfyUIClient(server),
+        prepare_attempt=lambda attempt, client: prepare_task_control_attempt(
+            attempt, client, store=get_task_store()
+        ),
+    )
+
+
+def get_service_diagnostics():
+    global _SERVICE_DIAGNOSTICS
+    if _SERVICE_DIAGNOSTICS is None:
+        _SERVICE_DIAGNOSTICS = ServiceDiagnostics(
+            store=get_task_store(), config=_CONFIG,
+            comfy_client_factory=lambda server: ComfyUIClient(server),
+        )
+    return _SERVICE_DIAGNOSTICS
+
+
+def build_task_control_payload(service, client, project_name="", status_filter=""):
+    """Build task-control data even when the configured ComfyUI server is offline."""
+    tasks = service.list_control_tasks(project_name, status_filter)
+    server_url = getattr(client, "server", "") or ""
+    try:
+        profile = dict(client.profile() or {})
+        profile.setdefault("server", server_url)
+        profile["online"] = True
+        return {"tasks": tasks, "server": profile}
+    except Exception as exc:
+        return {
+            "tasks": tasks,
+            "server": {
+                "server": server_url,
+                "online": False,
+                "error": f"offline: {exc}",
+            },
+        }
 
 # 异步扩写任务（逐段生成，前端轮询进度）
 EXPAND_JOBS = {}
@@ -1014,6 +1056,160 @@ def extract_last_frame(video_path):
     return out_png
 
 
+def persist_chain_frame(video_path, filename, frame_path=None):
+    """Persist a chain keyframe in the configured asset directory."""
+    safe_name = os.path.basename(str(filename or "")).strip()
+    if not safe_name or safe_name in {".", ".."}:
+        return None
+    existing = find_image(safe_name)
+    if existing:
+        return existing
+    frame_path = frame_path or extract_last_frame(video_path)
+    if not frame_path or not os.path.isfile(frame_path) or not IMAGE_DIRS:
+        return None
+    destination = os.path.join(IMAGE_DIRS[0], safe_name)
+    os.makedirs(os.path.dirname(destination) or IMAGE_DIRS[0], exist_ok=True)
+    shutil.copyfile(frame_path, destination)
+    return destination
+
+
+def _local_output_path(task):
+    output = task.get("output_file") if isinstance(task, dict) else None
+    if not isinstance(output, dict) or not output.get("filename"):
+        return None
+    return os.path.join(
+        OUTPUTS_DIR,
+        str(output.get("type") or "output"),
+        str(output.get("subfolder") or ""),
+        str(output.get("filename")),
+    )
+
+
+def ensure_chain_image(server, task, state):
+    """Materialize a missing chain image from the selected predecessor video."""
+    image = os.path.basename(str((task or {}).get("image") or "")).strip()
+    if not image:
+        return None
+    existing = find_image(image)
+    if existing:
+        return existing
+    if not ((task or {}).get("chain_prev") or image.startswith("chain_")):
+        return None
+    by_id = {str(item.get("id")): item for item in (state or {}).get("tasks", []) if item.get("id")}
+    predecessor = by_id.get(str((task or {}).get("chain_prev") or ""))
+    if not predecessor:
+        return None
+    video_path = _local_output_path(predecessor)
+    if not video_path or not os.path.isfile(video_path):
+        output = predecessor.get("output_file")
+        if output:
+            try:
+                download_outputs(server, [output])
+            except Exception:
+                return None
+    if not video_path or not os.path.isfile(video_path):
+        return None
+    return persist_chain_frame(video_path, image)
+
+
+def _chain_failure(code, detail):
+    summaries = {
+        "F-CHAIN-PREDECESSOR-MISSING": "链式前置段不存在或尚未成功",
+        "F-CHAIN-FRAME-MISSING": "链式前置段末帧无法恢复",
+    }
+    return TaskPreparationError({
+        "code": code,
+        "summary": summaries[code],
+        "detail": str(detail or ""),
+    })
+
+
+def _attempt_output_meta(attempt):
+    params = attempt.get("parameters") or {}
+    legacy = params.get("legacy") if isinstance(params, dict) else None
+    return attempt.get("output") or (legacy or {}).get("output_file")
+
+
+def _attempt_video_path(output):
+    if not isinstance(output, dict) or not output.get("filename"):
+        return None
+    return os.path.join(
+        OUTPUTS_DIR,
+        str(output.get("type") or "output"),
+        str(output.get("subfolder") or ""),
+        str(output.get("filename")),
+    )
+
+
+def prepare_task_control_attempt(attempt, client, store=None):
+    """Build and materialize a normalized attempt immediately before preflight.
+
+    Normalized records may originate from legacy tasks, so the graph is lazily
+    rebuilt here. Chain retries additionally persist and upload the predecessor
+    video's last frame before ComfyUI sees the graph.
+    """
+    parameters = copy.deepcopy(attempt.get("parameters") or {})
+    chain_mode = bool(parameters.get("chain_mode"))
+    predecessor_id = str(parameters.get("chain_prev") or "").strip()
+    predecessor = None
+    if chain_mode:
+        if not predecessor_id or store is None:
+            raise _chain_failure("F-CHAIN-PREDECESSOR-MISSING", "未选择可用的链式前置段")
+        predecessor = store.get_attempt(predecessor_id)
+        if not predecessor or predecessor.get("status") != "succeeded":
+            raise _chain_failure("F-CHAIN-PREDECESSOR-MISSING", predecessor_id)
+
+        output = _attempt_output_meta(predecessor)
+        video_path = _attempt_video_path(output)
+        if not video_path or not os.path.isfile(video_path):
+            if output:
+                try:
+                    download_outputs(getattr(client, "server", ""), [output])
+                except Exception:
+                    pass
+        if not video_path or not os.path.isfile(video_path):
+            raise _chain_failure("F-CHAIN-FRAME-MISSING", f"前置段输出不存在：{output or predecessor_id}")
+        chain_image = f"chain_{predecessor_id}.png"
+        persisted = persist_chain_frame(video_path, chain_image)
+        if not persisted:
+            raise _chain_failure("F-CHAIN-FRAME-MISSING", f"无法从前置段抽取末帧：{video_path}")
+        try:
+            client.upload_image(persisted, chain_image)
+        except Exception as exc:
+            raise _chain_failure("F-CHAIN-FRAME-MISSING", f"上传链式末帧失败：{exc}") from exc
+    else:
+        chain_image = None
+
+    legacy = parameters.get("legacy")
+    task = copy.deepcopy(legacy) if isinstance(legacy, dict) else None
+    if task is not None:
+        task.pop("chain_waiting", None)
+        task["chain_prev"] = predecessor_id if chain_mode else task.get("chain_prev")
+        if chain_image:
+            task["image"] = chain_image
+        graphs, error = build_graphs([task])
+        if error or not graphs or graphs[0][1] is None:
+            raise _chain_failure("F-CHAIN-FRAME-MISSING", error or "无法构建链式工作流") if chain_mode else RuntimeError(error or "无法构建任务工作流")
+        parameters["graph"] = graphs[0][1]
+        parameters.update({
+            key: task.get(key)
+            for key in ("mode", "mp", "duration", "steps", "images", "references")
+            if task.get(key) is not None
+        })
+
+    if chain_image:
+        graph = parameters.get("graph") or {}
+        found = False
+        for node in graph.values():
+            if node.get("class_type") == "LoadImage":
+                node.setdefault("inputs", {})["image"] = chain_image
+                found = True
+        if not found:
+            raise _chain_failure("F-CHAIN-FRAME-MISSING", "工作流中没有 LoadImage 节点")
+        parameters["chain_image"] = chain_image
+    return {"parameters": parameters}
+
+
 def submit_tasks(server, tasks, auto_download=True, chain_mode=False, role_images=None, scene_image=None):
     warnings = []
     # R2V 任务：三段式 → 官方六段式（仅本次会直接提交的段；链式等待段保持三段式，
@@ -1047,6 +1243,19 @@ def submit_tasks(server, tasks, auto_download=True, chain_mode=False, role_image
             if t.get("mode") == "r2v":
                 t["r2v_unet"] = use_unet
                 t["r2v_clip"] = use_clip
+    state = load_state()
+    # 链式重试先恢复首帧，再构图；否则构图阶段会把“图片丢失”误报成普通 I2V 配置错误。
+    restored_chain_images = {}
+    for task in tasks:
+        if task.get("mode") != "i2v" or not task.get("image") or task.get("chain_waiting"):
+            continue
+        if find_image(task["image"]):
+            continue
+        if task.get("chain_prev") or str(task.get("image") or "").startswith("chain_"):
+            restored = ensure_chain_image(server, task, state)
+            if not restored:
+                return None, f"链式首帧无法恢复：请确认前置段已成功并保留输出（{task['image']}）", warnings
+            restored_chain_images[task["image"]] = restored
     graphs, err = build_graphs(tasks)
     if err:
         return None, err, warnings
@@ -1055,7 +1264,7 @@ def submit_tasks(server, tasks, auto_download=True, chain_mode=False, role_image
         if task.get("chain_waiting"):
             continue
         if task["mode"] == "i2v" and task.get("image"):
-            lp = find_image(task["image"])
+            lp = restored_chain_images.get(task["image"]) or find_image(task["image"])
             if lp:
                 try:
                     upload_image(server, lp, task["image"])
@@ -1073,7 +1282,6 @@ def submit_tasks(server, tasks, auto_download=True, chain_mode=False, role_image
                 except Exception as e:
                     return None, f"上传参考图 {img} 失败：{e}", warnings
 
-    state = load_state()
     state["server"] = server
     state["auto_download"] = bool(auto_download)
     if role_images:
@@ -1471,7 +1679,14 @@ def advance_chain(server, state):
                 if png:
                     chain_img = f"chain_{ref['id']}.png"
                     try:
-                        upload_image(server, png, chain_img)
+                        persisted = persist_chain_frame(
+                            os.path.join(OUTPUTS_DIR, ref["output_file"]["type"], ref["output_file"]["subfolder"], ref["output_file"]["filename"]),
+                            chain_img,
+                            frame_path=png,
+                        )
+                        if not persisted:
+                            raise RuntimeError("链式末帧保存失败")
+                        upload_image(server, persisted, chain_img)
                         task = {
                             "id": nxt["id"], "name": nxt.get("name", nxt["id"]),
                             "mode": "i2v", "prompt": ensure_i2v_prompt(nxt.get("prompt", "")),
@@ -1542,7 +1757,11 @@ def advance_chain(server, state):
             continue
         chain_img = f"chain_{t['id']}.png"
         try:
-            upload_image(server, png, chain_img)
+            persisted = persist_chain_frame(video_file, chain_img, frame_path=png)
+            if not persisted:
+                print(f"[chain] 链式末帧保存失败：{t.get('name')}")
+                continue
+            upload_image(server, persisted, chain_img)
         except Exception as e:
             print(f"[chain] 上传失败：{e}")
             continue
@@ -2694,6 +2913,13 @@ def boogu_check(timeout=4):
 def _image_gen_endpoints():
     """返回 (主端点, 备用端点)；image_gen 配置。"""
     cfg = _CONFIG["image_gen"]
+    if str(cfg.get("provider") or "local") == "comfyui":
+        return {
+            "provider": "comfyui",
+            "provider_type": "comfyui",
+            "url": str((_CONFIG.get("comfyui") or {}).get("server") or "").rstrip("/"),
+            "model": str((cfg.get("comfyui") or {}).get("checkpoint") or "sd_xl_base_1.0.safetensors"),
+        }, None
     ptype = str(cfg.get("provider_type") or "openai").strip() or "openai"
     local = {"url": str(cfg["local"]["url"] or "").rstrip("/"), "provider": "local", "provider_type": "openai"}
     cloud = {
@@ -2707,6 +2933,43 @@ def _image_gen_endpoints():
     if str(cfg.get("provider") or "local") == "cloud":
         return cloud, local
     return local, cloud if cloud["enabled"] and cloud["url"] else None
+
+
+def _img_comfyui(ep, prompt, filename, size="768x1024", timeout=300):
+    """Run the standard SDXL image graph through the selected ComfyUI server."""
+    server = str(ep.get("url") or "").rstrip("/")
+    if not server:
+        raise RuntimeError("ComfyUI 生图服务器地址未配置")
+    match = re.match(r"^(\d+)\s*[xX]\s*(\d+)$", str(size or ""))
+    width, height = (int(match.group(1)), int(match.group(2))) if match else (768, 1024)
+    client = ComfyUIClient(server)
+    graph = build_sdxl_graph({"prompt": prompt, "width": width, "height": height, "steps": 12, "filename_prefix": "assets/diagnostic"})
+    preflight = client.preflight(graph)
+    if not preflight.get("ok"):
+        raise RuntimeError("ComfyUI 生图预检失败：" + json.dumps(preflight, ensure_ascii=False))
+    response = client.submit(graph, client_id="batch_console_image")
+    prompt_id = response.get("prompt_id") or response.get("id")
+    if not prompt_id:
+        raise RuntimeError("ComfyUI 生图未返回 prompt_id")
+    deadline = time.time() + timeout
+    output = None
+    while time.time() < deadline:
+        record = (client.history(prompt_id) or {}).get(prompt_id) or {}
+        for node in (record.get("outputs") or {}).values():
+            if node.get("images"):
+                output = node["images"][0]
+                break
+        if output:
+            break
+        time.sleep(1)
+    if not output:
+        raise RuntimeError("ComfyUI 生图超时：" + str(prompt_id))
+    _ensure_image_dirs()
+    destination = os.path.join(IMAGE_DIRS[0], os.path.basename(filename))
+    client.download_output(output, destination)
+    if not os.path.isfile(destination) or os.path.getsize(destination) == 0:
+        raise RuntimeError("ComfyUI 生图输出为空")
+    return os.path.basename(filename), destination
 
 
 def _img_openai(ep, prompt, filename, size="768x1024", timeout=300):
@@ -2876,6 +3139,8 @@ def _image_adapter_type(ep):
 def boogu_generate(prompt, filename, size="768x1024", timeout=300):
     """文生图统一入口：本地 Boogu 优先，配置云端或本地失败时降级云端。"""
     main, backup = _image_gen_endpoints()
+    if main.get("provider") == "comfyui":
+        return _img_comfyui(main, prompt, filename, size, timeout)
     last_err = None
     if main.get("provider") == "cloud":
         try:
@@ -3872,11 +4137,35 @@ class Handler(BaseHTTPRequestHandler):
             status_filter = qs.get("status", [""])[0]
             try:
                 service = get_task_service()
-                tasks = service.list_control_tasks(project_name, status_filter)
-                profile = ComfyUIClient(load_state().get("server") or DEFAULT_SERVER).profile()
-                self._send(200, json.dumps({"tasks": tasks, "server": profile}, ensure_ascii=False))
+                server_url = load_state().get("server") or DEFAULT_SERVER
+                client = ComfyUIClient(server_url)
+                payload = build_task_control_payload(service, client, project_name, status_filter)
+                self._send(200, json.dumps(payload, ensure_ascii=False))
             except Exception as exc:
                 self._send(503, json.dumps({"error": f"任务控制中心不可用：{exc}"}, ensure_ascii=False))
+            return
+        if path.path == "/api/diagnostics":
+            self._send(200, json.dumps(get_service_diagnostics().summary(), ensure_ascii=False))
+            return
+        if path.path == "/api/diagnostics/quick":
+            qs = urllib.parse.parse_qs(path.query)
+            service = qs.get("service", [""])[0]
+            try:
+                diagnostics = get_service_diagnostics()
+                result = diagnostics.quick_check_all() if service in ("", "all") else diagnostics.quick_check_service(service)
+                self._send(200, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
+        if path.path == "/api/diagnostics/run":
+            qs = urllib.parse.parse_qs(path.query)
+            run_id = qs.get("run_id", [""])[0]
+            try:
+                self._send(200, json.dumps(get_service_diagnostics().poll(run_id), ensure_ascii=False))
+            except KeyError:
+                self._send(404, json.dumps({"error": "诊断任务不存在"}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
             return
         if path.path == "/api/task/attempt":
             qs = urllib.parse.parse_qs(path.query)
@@ -4029,7 +4318,7 @@ class Handler(BaseHTTPRequestHandler):
                             ctype = "video/quicktime"
                         self._send_media(p, ctype)
                         return
-            self._send(404, "not found", "text/plain; charset=utf-8")
+            self._send(404, json.dumps({"error": "not found"}, ensure_ascii=False))
             return
         if path.path == "/api/records":
             rows = []
@@ -4082,7 +4371,7 @@ class Handler(BaseHTTPRequestHandler):
                 "current": job["current"], "error": job["error"],
             }, ensure_ascii=False))
             return
-        self._send(404, "not found", "text/plain; charset=utf-8")
+        self._send(404, json.dumps({"error": "not found"}, ensure_ascii=False))
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
@@ -4254,6 +4543,88 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"error": f"配置保存失败：{e}"}, ensure_ascii=False))
                 return
             self._send(200, json.dumps({"saved": True, "config": _CONFIG}, ensure_ascii=False))
+            return
+        if path == "/api/diagnostics/real":
+            service = str(body.get("service") or "")
+            try:
+                diagnostics = get_service_diagnostics()
+                # Settings tests may provide unsaved values; use them for this
+                # single run without mutating the persisted config.
+                if isinstance(body.get("config"), dict):
+                    diagnostics = ServiceDiagnostics(
+                        store=get_task_store(), config=body["config"],
+                        comfy_client_factory=lambda server: ComfyUIClient(server),
+                    )
+                result = diagnostics.start_real_test(
+                    service,
+                    confirm_cost=bool(body.get("confirm_cost")),
+                    confirm_gpu=bool(body.get("confirm_gpu")),
+                )
+                self._send(202, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
+        if path == "/api/llm/chat":
+            # Settings-page interactive chat.  It is deliberately separate from
+            # the fixed diagnostic prompt so history and the current form
+            # configuration can be sent on every turn.
+            if not body.get("confirm_cost"):
+                self._send(400, json.dumps({"error": "真实对话测试需要确认可能产生费用"}, ensure_ascii=False))
+                return
+            message = str(body.get("message") or "").strip()
+            if not message:
+                self._send(400, json.dumps({"error": "请输入对话内容"}, ensure_ascii=False))
+                return
+            if len(message) > 8000:
+                self._send(400, json.dumps({"error": "单条消息不能超过 8000 个字符"}, ensure_ascii=False))
+                return
+            history = body.get("history") or []
+            if not isinstance(history, list) or len(history) > 20:
+                self._send(400, json.dumps({"error": "对话历史格式无效"}, ensure_ascii=False))
+                return
+            messages = []
+            for item in history:
+                if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}:
+                    self._send(400, json.dumps({"error": "对话历史包含无效消息"}, ensure_ascii=False))
+                    return
+                content = str(item.get("content") or "").strip()
+                if content:
+                    messages.append({"role": item["role"], "content": content[:8000]})
+            messages.append({"role": "user", "content": message})
+            try:
+                config = body.get("config") if isinstance(body.get("config"), dict) else _CONFIG
+                diagnostics = ServiceDiagnostics(
+                    store=get_task_store(), config=config,
+                    comfy_client_factory=lambda server: ComfyUIClient(server),
+                )
+                adapter = diagnostics.adapters.get("llm")
+                if not adapter or not hasattr(adapter, "chat"):
+                    raise RuntimeError("当前 LLM 配置没有可用的聊天适配器")
+                result = adapter.chat(messages=messages, interactive=True)
+                response = str((result or {}).get("response") or "").strip()
+                if not response:
+                    raise RuntimeError("LLM 返回内容为空")
+                self._send(200, json.dumps({
+                    "ok": True,
+                    "response": response[:12000],
+                    "model": (result or {}).get("model") or (config.get("llm") or {}).get("model", ""),
+                }, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": f"LLM 对话失败：{exc}"}, ensure_ascii=False))
+            return
+        if path == "/api/diagnostics/quick":
+            service = str(body.get("service") or "")
+            try:
+                diagnostics = get_service_diagnostics()
+                if isinstance(body.get("config"), dict):
+                    diagnostics = ServiceDiagnostics(
+                        store=get_task_store(), config=body["config"],
+                        comfy_client_factory=lambda server: ComfyUIClient(server),
+                    )
+                result = diagnostics.quick_check_all() if service in ("", "all") else diagnostics.quick_check_service(service)
+                self._send(200, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
             return
         if path == "/api/task/preflight":
             try:
