@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-09-24 - v0.13.24 - 抽离 ComfyUI 客户端与结构化错误解析
+### 本次更新内容
+
+- **统一 ComfyUI 请求**：新增可测试的客户端，封装队列、历史、系统能力、工作流预检、取消、上传和下载接口，并让旧 HTTP 包装函数保持兼容。
+- **结构化失败信息**：新增显存不足、节点缺失、模型缺失和工作流校验失败等稳定错误码，同时对 Bearer/API Key 做脱敏。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_comfyui_client console.tests.test_failure_diagnostics -v`
+- `python -m py_compile console/comfyui_client.py console/failure_diagnostics.py console/batch_console.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 现有 `/api` 接口签名和任务提交逻辑保持不变；本次只替换底层请求实现。
+- 诊断模块不会记录或返回明文 API Key；远端 ComfyUI 离线时不会自动启动或提交任务。
+
 ## 2026-09-24 - v0.13.23 - 修复链式重生成卡在等待上一段
 ### 本次更新内容
 

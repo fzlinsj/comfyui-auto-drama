@@ -32,6 +32,11 @@ import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+try:
+    from .comfyui_client import ComfyUIClient
+except ImportError:
+    from comfyui_client import ComfyUIClient
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)  # 项目根（config.json 所在目录）
 STATE_FILE = os.path.join(BASE_DIR, "batch_state.json")
@@ -170,52 +175,16 @@ def _opener():
 
 
 def api_get(server, path, timeout=15):
-    req = urllib.request.Request(server + path, headers={"User-Agent": "batch-console"})
-    with _opener().open(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    return ComfyUIClient(server).transport.get_json(path, timeout=timeout)
 
 
 def api_post(server, path, payload, timeout=30):
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        server + path, data=data, method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "batch-console"},
-    )
-    with _opener().open(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    return ComfyUIClient(server).transport.post_json(path, payload, timeout=timeout)
 
 
 def upload_image(server, local_path, filename):
-    """上传参考图到服务器 input 目录（multipart，标准库手写）。"""
-    with open(local_path, "rb") as f:
-        raw = f.read()
-    boundary = "----CodexBatch" + uuid.uuid4().hex
-    parts = []
-
-    def add_file(name, fn, ctype, content):
-        parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; '
-            f'filename="{fn}"\r\nContent-Type: {ctype}\r\n\r\n'.encode("utf-8")
-        )
-        parts.append(content)
-        parts.append(b"\r\n")
-
-    def add_field(name, value):
-        parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
-            f"{value}\r\n".encode("utf-8")
-        )
-
-    add_file("image", filename, "image/png", raw)
-    add_field("type", "input")
-    add_field("overwrite", "true")
-    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
-    req = urllib.request.Request(
-        server + "/api/upload/image", b"".join(parts), method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "User-Agent": "batch-console"},
-    )
-    with _opener().open(req, timeout=120) as r:
-        return json.loads(r.read().decode("utf-8"))
+    """上传参考图到服务器 input 目录（保留旧调用签名）。"""
+    return ComfyUIClient(server).upload_image(local_path, filename)
 
 
 # ---------- 状态持久化 ----------
