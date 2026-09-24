@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-09-24 - v0.13.26 - 增加可控任务生命周期与链式刷新
+### 本次更新内容
+
+- **单段控制 API**：新增任务预检、单段提交、单段重试、取消/中断、批次取消和链式来源选择接口；重试创建独立子尝试，不覆盖失败父记录。
+- **失效检测**：只有在队列和历史查询均成功且连续两次找不到 prompt 时才标记 `stale`，连接失败不会误判。
+- **链式守护进程**：改为每 20 秒刷新规范化任务状态，不再自动替换前置视频或偷偷提交下一段。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_task_service console.tests.test_chain_resume -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/task_service.py console/batch_console.py console/chain_daemon.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 旧 `/api/status`、`/api/submit`、`/api/regenerate` 保留；新控制接口返回规范化尝试记录。
+- 正在运行的任务取消必须二次确认；失败、取消、失效任务不会自动重试、降画质或切换供应商。
+
 ## 2026-09-24 - v0.13.25 - 增加规范化任务尝试存储与旧任务迁移
 ### 本次更新内容
 

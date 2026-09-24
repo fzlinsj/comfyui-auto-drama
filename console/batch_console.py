@@ -35,9 +35,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 try:
     from .comfyui_client import ComfyUIClient
     from .task_store import TaskStore
+    from .task_service import TaskService
 except ImportError:
     from comfyui_client import ComfyUIClient
     from task_store import TaskStore
+    from task_service import TaskService
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)  # 项目根（config.json 所在目录）
@@ -161,6 +163,10 @@ def get_task_store():
     if _TASK_STORE is None:
         _TASK_STORE = TaskStore(DB_FILE)
     return _TASK_STORE
+
+
+def get_task_service():
+    return TaskService(get_task_store(), lambda server: ComfyUIClient(server))
 
 # 异步扩写任务（逐段生成，前端轮询进度）
 EXPAND_JOBS = {}
@@ -3860,6 +3866,31 @@ class Handler(BaseHTTPRequestHandler):
             server = qs.get("server", [DEFAULT_SERVER])[0]
             self._send(200, json.dumps(get_status(server), ensure_ascii=False))
             return
+        if path.path == "/api/tasks/control":
+            qs = urllib.parse.parse_qs(path.query)
+            project_name = qs.get("project", [""])[0]
+            status_filter = qs.get("status", [""])[0]
+            try:
+                service = get_task_service()
+                tasks = service.list_control_tasks(project_name, status_filter)
+                profile = ComfyUIClient(load_state().get("server") or DEFAULT_SERVER).profile()
+                self._send(200, json.dumps({"tasks": tasks, "server": profile}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(503, json.dumps({"error": f"任务控制中心不可用：{exc}"}, ensure_ascii=False))
+            return
+        if path.path == "/api/task/attempt":
+            qs = urllib.parse.parse_qs(path.query)
+            attempt_id = qs.get("attempt_id", [""])[0]
+            try:
+                attempt = get_task_store().get_attempt(attempt_id)
+            except Exception as exc:
+                self._send(503, json.dumps({"error": str(exc)}, ensure_ascii=False))
+                return
+            if not attempt:
+                self._send(404, json.dumps({"error": "尝试不存在"}, ensure_ascii=False))
+                return
+            self._send(200, json.dumps({"attempt": attempt}, ensure_ascii=False))
+            return
         if path.path == "/api/images":
             self._send(200, json.dumps({"images": list_images()}, ensure_ascii=False))
             return
@@ -4224,6 +4255,69 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, json.dumps({"saved": True, "config": _CONFIG}, ensure_ascii=False))
             return
+        if path == "/api/task/preflight":
+            try:
+                result = get_task_service().preflight_attempt(str(body.get("attempt_id") or ""))
+                self._send(200, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
+        if path == "/api/task/submit":
+            try:
+                service = get_task_service()
+                attempt_id = str(body.get("attempt_id") or "")
+                attempt = get_task_store().get_attempt(attempt_id)
+                if not attempt:
+                    raise ValueError("尝试不存在")
+                if attempt["status"] == "preflight_pending":
+                    checked = service.preflight_attempt(attempt_id)
+                    if checked.get("severity") == "block":
+                        self._send(409, json.dumps(checked, ensure_ascii=False))
+                        return
+                    if checked.get("severity") == "warning" and not body.get("confirm_warnings"):
+                        self._send(409, json.dumps({"confirmation_required": True, **checked}, ensure_ascii=False))
+                        return
+                result = service.submit_attempt(attempt_id)
+                self._send(200, json.dumps({"attempt": result}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
+        if path == "/api/task/retry":
+            try:
+                result = get_task_service().retry_attempt(str(body.get("attempt_id") or ""), body.get("overrides") or {})
+                self._send(200, json.dumps({"attempt": result}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
+        if path == "/api/task/cancel":
+            try:
+                result = get_task_service().cancel_attempt(
+                    str(body.get("attempt_id") or ""), confirm_interrupt=bool(body.get("confirm_interrupt"))
+                )
+                self._send(200, json.dumps({"attempt": result}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
+        if path == "/api/batch/cancel":
+            try:
+                result = get_task_service().cancel_batch(
+                    str(body.get("batch_id") or ""), cancel_running=bool(body.get("cancel_running"))
+                )
+                self._send(200, json.dumps({"attempts": result}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
+        if path == "/api/task/resolve_chain":
+            try:
+                result = get_task_service().resolve_chain(
+                    str(body.get("attempt_id") or ""),
+                    predecessor_attempt_id=body.get("predecessor_attempt_id") or None,
+                    disable_chain=bool(body.get("disable_chain")),
+                )
+                self._send(200, json.dumps({"attempt": result}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}, ensure_ascii=False))
+            return
         if path == "/api/submit":
             server = body.get("server", DEFAULT_SERVER)
             tasks = body.get("tasks", [])
@@ -4238,6 +4332,10 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self._send(400, json.dumps({"error": err}, ensure_ascii=False))
             else:
+                try:
+                    get_task_store().migrate_legacy_tasks(load_state().get("tasks", []), server)
+                except Exception as exc:
+                    print(f"[task-store] 迁移提交记录失败：{exc}", flush=True)
                 try:
                     st = load_state()
                     proj = dict(st.get("project") or {})
