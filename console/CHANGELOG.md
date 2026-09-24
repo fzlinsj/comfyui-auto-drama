@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-09-24 - v0.13.25 - 增加规范化任务尝试存储与旧任务迁移
+### 本次更新内容
+
+- **任务尝试表**：新增分段、尝试和诊断运行表，支持明确状态转换、父子重试关系、输出和失败信息持久化。
+- **兼容迁移**：控制台启动时幂等读取旧 `state.tasks`，保留完整原始任务字典并映射为成功、失败、阻塞、排队或待提交状态。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_task_store -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/task_store.py console/batch_console.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 不删除、不重建现有 `console.db`，原 `state` 键值表和项目快照继续由旧 API 管理。
+- 迁移以 `legacy_task_id` 保证幂等，不会重复创建历史尝试；本阶段尚未改变旧任务提交和轮询逻辑。
+
 ## 2026-09-24 - v0.13.24 - 抽离 ComfyUI 客户端与结构化错误解析
 ### 本次更新内容
 

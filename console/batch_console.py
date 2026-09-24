@@ -34,8 +34,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
     from .comfyui_client import ComfyUIClient
+    from .task_store import TaskStore
 except ImportError:
     from comfyui_client import ComfyUIClient
+    from task_store import TaskStore
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)  # 项目根（config.json 所在目录）
@@ -150,6 +152,15 @@ PROGRESS_LABELS = [
 ]
 
 lock = threading.Lock()
+_TASK_STORE = None
+
+
+def get_task_store():
+    """Return the normalized task store without changing legacy state APIs."""
+    global _TASK_STORE
+    if _TASK_STORE is None:
+        _TASK_STORE = TaskStore(DB_FILE)
+    return _TASK_STORE
 
 # 异步扩写任务（逐段生成，前端轮询进度）
 EXPAND_JOBS = {}
@@ -4848,6 +4859,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8890
+    store = get_task_store()
+    legacy_state = load_state()
+    store.migrate_legacy_tasks(legacy_state.get("tasks", []), legacy_state.get("server") or DEFAULT_SERVER)
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"ComfyUI 批量控制台已启动：http://127.0.0.1:{port}")
     print(f"工作流目录：{DEFAULT_WORKFLOW_DIR}")
