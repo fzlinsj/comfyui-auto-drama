@@ -1432,6 +1432,21 @@ def get_status(server):
     return {"server_ok": True, "tasks": out}
 
 
+def _is_chain_retry_task(task, tasks):
+    """识别重生成产生的链式等待任务，允许复用已推进过的前置任务。"""
+    if task.get("chain_retry"):
+        return True
+    # 兼容旧记录：重新生成版本名通常为原名加 _v2/_v3，数据库中同时保留原名。
+    name = str(task.get("name") or "")
+    m = re.fullmatch(r"(.+)_v\d+", name)
+    if not m:
+        return False
+    return any(
+        other is not task and str(other.get("name") or "") == m.group(1)
+        for other in tasks
+    )
+
+
 def advance_chain(server, state):
     """链式衔接：上一段完成并下载后，抽最后一帧上传，提交下一段。"""
     tasks = state.get("tasks", [])
@@ -1446,7 +1461,7 @@ def advance_chain(server, state):
             t = tasks[i - 1]
         if t is None:
             continue
-        if t.get("chain_done"):
+        if t.get("chain_done") and not _is_chain_retry_task(nxt, tasks):
             continue
         if not t.get("prompt_id"):
             continue
@@ -4800,6 +4815,7 @@ class Handler(BaseHTTPRequestHandler):
                     if pc:
                         new_task["chain_prev"] = pc[-1]["id"]
                         new_task["chain_waiting"] = True
+                        new_task["chain_retry"] = True
                     else:
                         self._send(400, json.dumps({"error": f"上一段「{pname}」还没有视频，无法链式重生成"}, ensure_ascii=False))
                         return

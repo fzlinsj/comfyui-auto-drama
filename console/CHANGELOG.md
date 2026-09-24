@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-09-24 - v0.13.23 - 修复链式重生成卡在等待上一段
+### 本次更新内容
+
+- **链式重生成**：允许重生成任务复用已经完成并标记过 `chain_done` 的前置视频；此前该标记会错误阻止重生成任务继续提交。
+- **旧记录兼容**：对已经写入数据库但没有新标记的版本任务，通过原任务名与 `_v2`/`_v3` 版本关系识别为链式重生成。
+- **显式标记**：后续 `/api/regenerate` 创建链式等待任务时写入 `chain_retry`，避免与普通批次链式任务混淆。
+- **回归测试**：新增等待任务复用已完成前置任务的测试。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_chain_resume -v`
+- `python -m unittest discover -s console/tests -p 'test_*.py' -v`
+- `python -m py_compile console/batch_console.py console/start_daemons.py console/chain_daemon.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 不改变普通批次链式任务的防重复行为；只允许明确的重生成版本继续使用已完成前置视频。
+- 已卡住的 `最后两分钟_04_v4_v2` 已使用第 3 段本地视频提交到当前 ComfyUI，当前任务由 ComfyUI 继续生成。
+- 不会自动提交其他分段，也不会改变分辨率或步数。
+
+
 ## 2026-09-24 - v0.13.22 - 重生成后自动显示任务状态
 ### 本次更新内容
 
