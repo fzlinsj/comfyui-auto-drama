@@ -13,11 +13,14 @@ console/batch_state.json
 console/batch_state.json.bak
 console/*.log
 console/*.err.log
+console/*.part
+console/*.safetensors
 console/batch_records.csv
 console/batch_records.md
 console/__pycache__/
 *.pyc
 .playwright-cli/
+.superpowers/
 
 # ---- 个人内容与素材（演示项目不包含） ----
 _private/

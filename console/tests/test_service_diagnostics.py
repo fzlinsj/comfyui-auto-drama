@@ -113,6 +113,22 @@ class ServiceDiagnosticsTests(unittest.TestCase):
         self.assertEqual(captured["payload"]["messages"][0]["content"], "你好")
         self.assertEqual(result["response"], "你好，我是测试助手")
 
+    def test_http_image_adapter_uses_custom_diagnostic_prompt(self):
+        adapter = _HttpAdapter("https://example.test/v1", model="agnes-image-2.5-flash")
+        captured = {}
+
+        def fake_request(path, payload=None, timeout=30):
+            captured["path"] = path
+            captured["payload"] = payload
+            return {"data": [{"url": "https://example.test/result.png"}]}
+
+        adapter._request = fake_request
+        result = adapter.generate(parameters={"prompt": "雨夜霓虹街道，一辆红色跑车"})
+
+        self.assertEqual(captured["path"], "/images/generations")
+        self.assertEqual(captured["payload"]["prompt"], "雨夜霓虹街道，一辆红色跑车")
+        self.assertEqual(result["url"], "https://example.test/result.png")
+
     def test_http_adapter_quick_check_exposes_safe_failure_details(self):
         adapter = _HttpAdapter("https://example.test/v1", api_key="secret-token", model="deepseek-chat")
         adapter._request = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("401 secret-token"))
@@ -168,7 +184,11 @@ class ServiceDiagnosticsTests(unittest.TestCase):
             adapters={"comfyui": self.comfy},
             output_dir=self.temp_dir.name,
         )
-        run = diagnostics.start_real_test("comfyui_image", confirm_gpu=True)
+        run = diagnostics.start_real_test(
+            "comfyui_image",
+            confirm_gpu=True,
+            parameters={"prompt": "电影感雪山日出，金色云海"},
+        )
         for _ in range(100):
             result = diagnostics.poll(run["run_id"])
             if result["status"] != "running":
@@ -180,6 +200,8 @@ class ServiceDiagnosticsTests(unittest.TestCase):
         self.assertTrue(graph)
         self.assertTrue(all("class_type" in node and "inputs" in node for node in graph.values()))
         self.assertNotIn("diagnostic_service", graph)
+        encoded_text = [node["inputs"].get("text") for node in graph.values() if node["class_type"] == "CLIPTextEncode"]
+        self.assertIn("电影感雪山日出，金色云海", encoded_text)
         self.assertEqual(self.comfy.history_calls, ["diagnostic-prompt"])
         self.assertTrue(Path(result["result"]["filename"]).is_file())
 

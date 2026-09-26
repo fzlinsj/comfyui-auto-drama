@@ -38,12 +38,14 @@ try:
     from .task_store import TaskStore
     from .task_service import TaskPreparationError, TaskService
     from .service_diagnostics import ServiceDiagnostics, SERVICES
+    from .environment_manager import EnvironmentManager
     from workflows.build_sdxl_graph import build_sdxl_graph
 except ImportError:
     from comfyui_client import ComfyUIClient
     from task_store import TaskStore
     from task_service import TaskPreparationError, TaskService
     from service_diagnostics import ServiceDiagnostics, SERVICES
+    from environment_manager import EnvironmentManager
     from workflows.build_sdxl_graph import build_sdxl_graph
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -161,6 +163,7 @@ PROGRESS_LABELS = [
 lock = threading.Lock()
 _TASK_STORE = None
 _SERVICE_DIAGNOSTICS = None
+_ENVIRONMENT_MANAGER = None
 
 
 def get_task_store():
@@ -189,6 +192,13 @@ def get_service_diagnostics():
             comfy_client_factory=lambda server: ComfyUIClient(server),
         )
     return _SERVICE_DIAGNOSTICS
+
+
+def get_environment_manager():
+    global _ENVIRONMENT_MANAGER
+    if _ENVIRONMENT_MANAGER is None:
+        _ENVIRONMENT_MANAGER = EnvironmentManager(get_task_store())
+    return _ENVIRONMENT_MANAGER
 
 
 def build_task_control_payload(service, client, project_name="", status_filter=""):
@@ -4113,6 +4123,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path)
+        if path.path == "/api/environments/recipes":
+            try:
+                self._send(200, json.dumps({"recipes": get_environment_manager().list_recipes()}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(500, json.dumps({"error_code": "E-VERIFY", "error": str(exc)}, ensure_ascii=False))
+            return
+        if path.path.startswith("/api/environments/jobs/"):
+            job_id = urllib.parse.unquote(path.path.rsplit("/", 1)[-1])
+            try:
+                job = get_environment_manager().get_job(job_id)
+            except Exception as exc:
+                self._send(500, json.dumps({"error_code": "E-VERIFY", "error": str(exc)}, ensure_ascii=False))
+                return
+            if not job:
+                self._send(404, json.dumps({"error_code": "E-NOT-FOUND", "error": "部署任务不存在"}, ensure_ascii=False))
+            else:
+                self._send(200, json.dumps({"job": job}, ensure_ascii=False))
+            return
+        if path.path.startswith("/api/environments/manifest/"):
+            target_id = urllib.parse.unquote(path.path.rsplit("/", 1)[-1])
+            manifest = get_environment_manager().get_manifest(target_id)
+            if manifest is None:
+                self._send(404, json.dumps({"error_code": "E-NOT-FOUND", "error": "环境 manifest 不存在"}, ensure_ascii=False))
+            else:
+                self._send(200, json.dumps({"manifest": manifest}, ensure_ascii=False))
+            return
         if path.path == "/":
             if not os.path.exists(INDEX_FILE):
                 self._send(404, "index.html 不存在", "text/plain; charset=utf-8")
@@ -4284,6 +4320,10 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             self._send(200, json.dumps(cfg, ensure_ascii=False))
             return
+        if path.path == "/api/environment/ssh-command":
+            command = str((_CONFIG.get("environment") or {}).get("ssh_command") or "")
+            self._send(200, json.dumps({"ssh_command": command}, ensure_ascii=False))
+            return
         if path.path == "/api/boogu_check":
             self._send(200, json.dumps(boogu_check(), ensure_ascii=False))
             return
@@ -4311,12 +4351,25 @@ class Handler(BaseHTTPRequestHandler):
                 for root, _, files in os.walk(OUTPUTS_DIR):
                     if fn in files:
                         p = os.path.join(root, fn)
+                        lower = fn.lower()
                         ctype = "video/mp4"
-                        if fn.lower().endswith(".webm"):
+                        if lower.endswith(".png"):
+                            ctype = "image/png"
+                        elif lower.endswith((".jpg", ".jpeg")):
+                            ctype = "image/jpeg"
+                        elif lower.endswith(".webp"):
+                            ctype = "image/webp"
+                        elif lower.endswith(".gif"):
+                            ctype = "image/gif"
+                        elif lower.endswith(".webm"):
                             ctype = "video/webm"
-                        elif fn.lower().endswith(".mov"):
+                        elif lower.endswith(".mov"):
                             ctype = "video/quicktime"
-                        self._send_media(p, ctype)
+                        if ctype.startswith("video/"):
+                            self._send_media(p, ctype)
+                        else:
+                            with open(p, "rb") as f:
+                                self._send(200, f.read(), ctype)
                         return
             self._send(404, json.dumps({"error": "not found"}, ensure_ascii=False))
             return
@@ -4374,11 +4427,60 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, json.dumps({"error": "not found"}, ensure_ascii=False))
 
     def do_POST(self):
+        global _CONFIG, _VISION_ENV
         path = urllib.parse.urlparse(self.path).path
         try:
             body = self._read_json()
         except Exception:
             self._send(400, json.dumps({"error": "JSON 解析失败"}, ensure_ascii=False))
+            return
+        if path == "/api/environments/scan":
+            try:
+                result = get_environment_manager().scan_target(body)
+                self._send(200, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                code = getattr(exc, "code", "E-SSH-AUTH")
+                details = getattr(exc, "details", {})
+                self._send(400, json.dumps({"error_code": code, "error": str(exc), "details": details}, ensure_ascii=False))
+            return
+        if path == "/api/environments/plan":
+            try:
+                result = get_environment_manager().make_plan(
+                    body.get("target_id"), body.get("scan_id"), body.get("recipe_id") or "minimax-h3-sdxl"
+                )
+                self._send(200, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                code = getattr(exc, "code", "E-WORKFLOW")
+                self._send(400, json.dumps({"error_code": code, "error": str(exc)}, ensure_ascii=False))
+            return
+        if path == "/api/environments/deploy":
+            try:
+                result = get_environment_manager().start_deploy(
+                    body.get("plan_id"), body.get("recipe_version"), bool(body.get("confirm"))
+                )
+                self._send(202, json.dumps({"job": result}, ensure_ascii=False))
+            except Exception as exc:
+                code = getattr(exc, "code", "E-WORKFLOW")
+                details = getattr(exc, "details", {})
+                self._send(400, json.dumps({"error_code": code, "error": str(exc), "details": details}, ensure_ascii=False))
+            return
+        if path.startswith("/api/environments/jobs/") and path.endswith("/retry"):
+            job_id = urllib.parse.unquote(path.split("/api/environments/jobs/", 1)[1].rsplit("/", 1)[0])
+            try:
+                result = get_environment_manager().retry_step(job_id, body.get("step"))
+                self._send(200, json.dumps({"job": result}, ensure_ascii=False))
+            except Exception as exc:
+                code = getattr(exc, "code", "E-VERIFY")
+                self._send(400, json.dumps({"error_code": code, "error": str(exc)}, ensure_ascii=False))
+            return
+        if path.startswith("/api/environments/jobs/") and path.endswith("/cancel"):
+            job_id = urllib.parse.unquote(path.split("/api/environments/jobs/", 1)[1].rsplit("/", 1)[0])
+            try:
+                result = get_environment_manager().cancel_job(job_id)
+                self._send(200, json.dumps({"job": result}, ensure_ascii=False))
+            except Exception as exc:
+                code = getattr(exc, "code", "E-VERIFY")
+                self._send(400, json.dumps({"error_code": code, "error": str(exc)}, ensure_ascii=False))
             return
         if path == "/api/check":
             server = body.get("server", DEFAULT_SERVER)
@@ -4535,7 +4637,6 @@ class Handler(BaseHTTPRequestHandler):
                     shutil.copy(p, p + ".bak")
                 with open(p, "w", encoding="utf-8") as f:
                     json.dump(new_cfg, f, ensure_ascii=False, indent=2)
-                global _CONFIG, _VISION_ENV
                 _CONFIG = load_config()
                 # 端点/视觉读取 _CONFIG，保存后立即生效；静态常量重启后同步
                 _VISION_ENV = None
@@ -4543,6 +4644,30 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"error": f"配置保存失败：{e}"}, ensure_ascii=False))
                 return
             self._send(200, json.dumps({"saved": True, "config": _CONFIG}, ensure_ascii=False))
+            return
+        if path == "/api/environment/ssh-command":
+            command = str(body.get("ssh_command") or "").strip()
+            if len(command) > 1000 or any(ch in command for ch in "\r\n"):
+                self._send(400, json.dumps({"error": "SSH 登录命令格式无效"}, ensure_ascii=False))
+                return
+            try:
+                p = _config_path()
+                cfg = load_config()
+                cfg["environment"] = dict(cfg.get("environment") or {})
+                if command:
+                    cfg["environment"]["ssh_command"] = command
+                else:
+                    cfg["environment"].pop("ssh_command", None)
+                if os.path.isfile(p):
+                    shutil.copy(p, p + ".bak")
+                with open(p, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, ensure_ascii=False, indent=2)
+                _CONFIG = load_config()
+                _VISION_ENV = None
+            except Exception as exc:
+                self._send(400, json.dumps({"error": f"SSH 登录命令保存失败：{exc}"}, ensure_ascii=False))
+                return
+            self._send(200, json.dumps({"saved": True}, ensure_ascii=False))
             return
         if path == "/api/diagnostics/real":
             service = str(body.get("service") or "")
@@ -4559,6 +4684,7 @@ class Handler(BaseHTTPRequestHandler):
                     service,
                     confirm_cost=bool(body.get("confirm_cost")),
                     confirm_gpu=bool(body.get("confirm_gpu")),
+                    parameters=body.get("parameters"),
                 )
                 self._send(202, json.dumps(result, ensure_ascii=False))
             except Exception as exc:

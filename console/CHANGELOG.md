@@ -5,6 +5,480 @@
 
 ---
 
+## 2026-09-26 - v0.13.63 - 修复 Git 镜像失败后的目录阻塞
+### 本次更新内容
+
+- GitHub 节点的首个镜像克隆失败后，自动清理留下的空目录，让后续镜像可以继续尝试。
+- 已存在节点仓库会先切换 `origin` 到当前回退地址再 fetch，避免一直重试失效的旧地址。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_ssh console.tests.test_environment_downloader -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `python -m py_compile console/environment_ssh.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 仅清理目标节点目录下的空目录；非空且不是 Git 仓库的目录仍会拒绝覆盖。
+- 需要重试“下载模型”步骤，旧的失败状态不会自动重新执行。
+
+## 2026-09-26 - v0.13.62 - 国内下载源优先并扩展 GitHub 回退
+### 本次更新内容
+
+- Hugging Face 下载优先使用 `hf-mirror.com`，官方地址作为最后回退，避免云服务器先在不可达的官方源上长时间等待。
+- GitHub 节点增加 `ghfast.top`、`gh-proxy.com`、`ghproxy.net` 三个候选代理，官方 GitHub 最后尝试。
+- 保留断点续传、大小和 SHA256 校验；镜像返回错误内容时不会覆盖正式模型文件。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_downloader -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `python -m py_compile console/environment_downloader.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 需要重启控制台后重新生成部署计划并重试“下载模型”步骤；旧任务不会自动改变已记录的下载源。
+- 代理站点均为无凭据公开地址，最终文件仍必须通过 recipe 中的 SHA256 校验。
+
+## 2026-09-25 - v0.13.61 - 持久化 SSH 命令并增加 GitHub 国内回退
+### 本次更新内容
+
+- SSH 登录命令同时保存到项目配置的非敏感字段，解决使用不同本机地址或浏览器存储隔离时无法回填的问题。
+- SSH 密码、私钥和 API Key 不会写入该字段；页面仍只自动回填 SSH 命令。
+- GitHub 节点克隆增加国内代理回退，并为 Git 连接增加超时和低速检测。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_api_routes console.tests.test_environment_ui console.tests.test_environment_downloader -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `python -m py_compile console/batch_console.py console/environment_downloader.py console/environment_ssh.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- SSH 命令会写入项目根目录 `config.json`，仅包含连接命令，不包含密码。
+- GitHub 直连失败时才尝试代理地址；节点内容仍由 Git 克隆结果确认。
+
+## 2026-09-25 - v0.13.60 - 统一增加 Hugging Face 国内镜像回退
+### 本次更新内容
+
+- 下载器现在会自动识别 `huggingface.co` 地址并追加对应的 `hf-mirror.com` 地址，配方无需逐项手工填写镜像。
+- 官方源、配方显式回退源和自动镜像源会去重并按顺序尝试；所有来源仍执行原有大小与 SHA256 校验。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_downloader -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 当前自动镜像仅针对 Hugging Face 文件下载；GitHub 节点不自动使用不稳定代理，失败时会保留原始错误来源。
+
+## 2026-09-25 - v0.13.59 - 增加 Hugging Face 镜像回退与连接超时
+### 本次更新内容
+
+- 为公开 Hugging Face 模型增加 `hf-mirror.com` 回退地址；主站连接失败时自动切换。
+- 远端 `curl`/`wget` 增加连接超时和重试参数，避免网络不可达时长时间卡在下载步骤。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_ssh console.tests.test_environment_downloader -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 镜像只作为公开模型的备用来源，文件仍必须通过配方 SHA256 校验后才会落盘。
+- 如果云服务器同时无法访问 Hugging Face 镜像和 GitHub，任务会显示具体失败来源。
+
+## 2026-09-25 - v0.13.58 - 记住 SSH 登录命令但不保存密码
+### 本次更新内容
+
+- 环境部署设置会将最近使用的 SSH 登录命令保存到当前浏览器的 `localStorage`，下次打开页面自动回填。
+- SSH 密码、私钥和其他凭据仍只用于当前操作，不写入浏览器、本地配置或数据库。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 清除浏览器站点数据会同时清除已记住的 SSH 命令；密码字段始终保持不记忆。
+
+## 2026-09-25 - v0.13.57 - 将部署下载迁移到远端 SSH 主机
+### 本次更新内容
+
+- 模型下载改为在扫描到的远端数据盘执行，使用断点续传、文件大小和 SHA256 校验后再替换正式文件。
+- ComfyUI 节点资源改为通过受限的 Git 克隆 recipe 安装到远端 `custom_nodes`，不再把 Git URL 当作普通文件下载。
+- 部署失败消息保留下载源和远端错误摘要，便于直接使用“重试步骤”定位问题；无 GPU 时仍可完成 CPU 准备阶段。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_ssh console.tests.test_environment_downloader console.tests.test_environment_deployer -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `python -m py_compile console/environment_ssh.py console/environment_downloader.py console/environment_deployer.py console/environment_manager.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 部署必须使用当前扫描建立的 SSH 会话；会话失效时会明确提示重新扫描，不会退回本机下载。
+- 下载和克隆需要远端系统具备 `curl` 或 `wget`、`sha256sum`、`git`；GPU 不参与环境准备阶段。
+
+## 2026-09-25 - v0.13.53 - 修复环境资源探测误报并避免增强模型阻塞部署
+### 本次更新内容
+
+- 远端模型探针跟随 ComfyUI 模型软链接，并在配置的 ComfyUI/数据盘路径下递归发现 `models` 目录，兼容共享模型挂载；重复路径会去重。
+- 没有公开下载源的增强模型改为风险提示，不再把基础环境部署整体标记为“需要人工提供”并阻塞按钮。
+- 计划页在 `blocked` 时明确说明尚未创建部署任务，解释“重试步骤/取消任务”为什么不可用，避免把计划阻塞误认为按钮故障。
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_scanner console.tests.test_environment_planner console.tests.test_environment_ui -v`
+- `python -m py_compile console/environment_ssh.py console/environment_scanner.py console/environment_planner.py`
+- `git diff --check`
+### 影响与注意事项
+
+- 修改后需重启控制台并重新扫描远端环境；旧扫描快照不会自动补充模型清单。
+- 有官方来源的模型仍会按实际缺失文件和磁盘空间检查；磁盘不足时继续阻塞，避免启动后必然失败。
+- 私有增强模型缺失时基础部署可以继续，但对应增强工作流的最终验证仍会提示缺少该资源。
+
+## 2026-09-25 - v0.13.54 - 复用整合包中的同名模型，避免重复下载导致磁盘阻塞
+### 本次更新内容
+
+- 发现远端已有同名模型时，即使整合包文件大小与 recipe 清单不同，也优先复用现有文件，并将差异保留为风险提示。
+- 避免因为量化/缩放版本的清单大小差异，把已有模型错误加入下载清单，导致 22 GB 数据盘被错误判定为无法部署。
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_planner console.tests.test_environment_scanner console.tests.test_environment_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `git diff --check`
+### 影响与注意事项
+
+- 同名文件会在部署后的工作流验证中继续检查；如果实际版本不兼容，验证步骤会失败并允许单独重试。
+- 配方中完全缺失且有可靠下载源的模型仍会进入下载清单，并按可用空间阻塞部署。
+
+## 2026-09-25 - v0.13.55 - 识别 MiniMax H3 量化与安全变体
+### 本次更新内容
+
+- 计划器识别 MiniMax H3 的 `fp8_scaled`、`heretic`、Turbo LoRA 和 generation-tail 变体，并在同一模型目录下复用已安装变体。
+- 计划结果显示实际采用的远端文件名，保留“未找到配方同名文件/已复用兼容变体”的风险提示，避免把几十 GB 的已安装权重重复加入下载清单。
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_planner -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `git diff --check`
+### 影响与注意事项
+
+- 变体匹配仅限 MiniMax H3 已知模型族、同一 ComfyUI `target_dir`，不会用任意文件冒充模型。
+- 变体最终是否能被当前 ComfyUI 节点接受，仍由部署后的 SDXL/T2V/I2V/R2V 验证确认。
+
+## 2026-09-25 - v0.13.56 - 实时显示环境部署进度
+### 本次更新内容
+
+- 部署器增加逐步骤进度回调，完成扫描、目录准备、模型下载或验证步骤后立即更新任务状态。
+- 页面显示当前“执行中”步骤，不再在长时间下载期间把所有步骤都显示为“待执行”。
+- 部署线程异常或步骤失败会即时进入任务结果，用户可以看到失败步骤并使用重试/取消控制。
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_deployer console.tests.test_environment_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `python -m py_compile console/environment_deployer.py console/environment_manager.py`
+- `git diff --check`
+### 影响与注意事项
+
+- 需要重启控制台并刷新页面后生效；部署中的已有旧任务不会补发历史进度。
+- 进度回调只更新 SQLite/内存状态，不会改变远端部署步骤的执行顺序。
+
+## 2026-09-25 - v0.13.52 - 修复远端模型探针误报 SSH 认证失败
+### 本次更新内容
+
+- 修复远端模型/节点探针在可选目录不存在时返回非零退出码，导致已有扫描输出被误判为 `E-SSH-AUTH` 的问题。
+- 探针仍只读取配置的 ComfyUI 与数据盘目录；目录不存在时按空目录处理并正常完成扫描。
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_ssh -v`
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `python -m py_compile console/environment_ssh.py`
+- `git diff --check`
+### 影响与注意事项
+
+- 需要重启控制台服务后重新点击“扫描远端环境”；不会改变 SSH 密码、指纹或远端文件。
+
+## 2026-09-25 - v0.13.51 - 完善远端模型复用与部署资源校验
+### 本次更新内容
+
+- 修正 MiniMax H3 文本编码器官方下载地址，指向官方仓库的 `text_encoders` 目录。
+- 工作流模型引用提取覆盖 MiniMax H3 生成尾模型，并纳入部署配方资源校验。
+- 远端扫描发现已安装且匹配的模型/节点时直接复用；人工提供资源未找到时阻塞部署并返回 `E-RESOURCE`，避免生成中途才暴露缺失模型。
+- 配方补充官方模型大小与 SHA256；没有可靠下载来源的人工资源明确标记为不可自动管理。
+### 验证方式
+
+- `python -m unittest discover -s console/tests -p "test_*.py"`
+- `python -c "import pathlib,py_compile; [py_compile.compile(str(path), doraise=True) for path in pathlib.Path('console').glob('environment_*.py')]"`
+- `python -m json.tool recipes/minimax-h3-sdxl.json > $null`
+- `git diff --check`
+### 影响与注意事项
+
+- 部署计划会按扫描到的文件名、目标目录和大小判断复用；大小不一致的模型会保留风险并重新纳入下载。
+- 人工资源仍需用户预先放入对应 ComfyUI 模型目录，系统不会尝试从未知来源下载。
+### 失败码 / 错误提示变化
+
+- 新增 `E-RESOURCE`：配方声明的人工资源未在远端扫描结果中找到时返回该错误，并列出缺失文件名。
+
+---
+
+## 2026-09-25 - v0.13.50 - 复用远端已安装模型并显示实际下载清单
+### 本次更新内容
+
+- 后端：新增只读 `model_probe`，扫描配置的 ComfyUI / 数据盘模型目录和 `custom_nodes`，记录文件名、目标目录、大小及路径。
+- 计划器：按资源类型、目标目录和文件名匹配远端清单；大小一致的模型和已存在节点直接复用，大小不一致的模型标记风险并重新纳入下载。
+- 前端：扫描结果显示已发现模型/节点，部署计划显示复用资源和实际需要下载的资源，避免把已安装模型重复计入磁盘需求。
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_ui console.tests.test_environment_ssh console.tests.test_environment_scanner console.tests.test_environment_planner console.tests.test_environment_api`：37 项通过。
+- `model_probe` 仅接受 `comfy_path` 和 `data_path`，不接受任意 shell 参数；扫描命令只读，不安装、不下载、不启动服务。
+### 影响与注意事项
+
+- 需要重启控制台服务后重新执行“扫描远端环境”，旧扫描记录不会自动补充模型清单。
+- 配方中模型大小仍需准确；远端文件大小不匹配时会显示风险并按需重新下载。
+### 失败码 / 错误提示变化
+
+- 无新增错误码；磁盘不足仍使用 `E-DISK`，模型大小不匹配显示在计划风险中。
+
+---
+
+## 2026-09-25 - v0.13.49 - 修复远端环境扫描结果为空
+### 本次更新内容
+
+- 修复真实 SSH 探针返回普通文本时未被解析，导致平台、GPU、磁盘、Python 和 ComfyUI 全部显示未检测到的问题。
+- 增加对 `uname`、`nvidia-smi`、`df`、Python 版本和 ComfyUI 入口路径输出的兼容解析。
+- 兼容 `python3 -c 'import sys; print(sys.version)'` 返回的纯版本字符串格式。
+- 使用设置页选择的云平台作为主机名无法识别时的后备值，避免 AutoDL 等连接域名显示为 `unknown`。
+- 保留测试夹具使用结构化字典的兼容性，避免影响已有部署规划逻辑。
+
+### 验证方式
+
+- 新增普通 SSH 文本输出回归测试。
+- 新增 Python `sys.version` 输出回归测试。
+- 新增平台选择后备值回归测试。
+- 全量控制台测试、Python 编译、配方 JSON 校验和 `git diff --check`。
+
+### 影响与注意事项
+
+- 需要重启控制台服务后重新点击“扫描远端环境”。
+- 扫描仍为只读探针，不会安装依赖、下载模型或启动 ComfyUI。
+
+---
+
+## 2026-09-25 - v0.13.48 - SSH 密码自动认证与一键环境扫描
+### 本次更新内容
+
+- 用户只需输入 SSH 命令和密码即可完成首次环境扫描。
+- 通过临时 `SSH_ASKPASS` helper 完成认证，密码不写入命令行、日志、配置或 SQLite。
+- 首次主机指纹由后台记录，后续变化默认阻止，并提供页面内“重新建立信任”按钮。
+- 保留私钥和 SSH Agent 兼容方式；本次未实现远程安装、模型下载和 GPU 生成。
+
+### 验证方式
+
+- 定向 SSH、环境存储、环境 API 和环境设置页测试。
+- 全量控制台测试、Python 编译、配方 JSON 校验和 `git diff --check`。
+
+### 影响与注意事项
+
+- 首次扫描不再要求用户输入或确认主机指纹；指纹变化时需在页面确认当前实例后重新建立信任。
+- 密码只存在本次扫描的进程内存和子进程环境，扫描结束后立即清理临时 helper。
+
+---
+
+## 2026-09-25 - v0.13.47 - 兼容 AutoDL SSH 主机指纹协商
+### 本次更新内容
+
+- 修复 Windows 自带 `ssh-keyscan` 与晨羽智云/AutoDL SSH 服务端 KEX 协商失败导致无法获取指纹的问题。
+- 指纹观察改为一次不执行远端命令的 SSH 握手，显式使用兼容 KEX，并从临时 `known_hosts` 计算主机指纹。
+- 远端探针只信任刚才用户确认过的主机公钥；临时 `known_hosts` 和私钥文件在命令结束后清理。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_ssh console.tests.test_environment_api console.tests.test_environment_api_routes console.tests.test_environment_deployer console.tests.test_environment_scanner console.tests.test_environment_planner console.tests.test_environment_recipes console.tests.test_environment_store console.tests.test_environment_ui -v`（40 项通过）
+- `python` 调用项目 `SSHSession.observe_fingerprint` 连接 `connect.nmb2.seetacloud.com:18078`，成功得到 `SHA256:liZ36vNCsNcNdXeWs4f+g5ZIhPM/ZihP834vxs8Ulqc`
+- 兼容握手实测成功写入 ED25519 主机公钥；未提供认证时的 `Permission denied` 属于预期，不执行任何远端探针。
+
+### 影响与注意事项
+
+- 设置页首次扫描流程不变：获取指纹后核对并勾选，再次扫描执行环境探针。
+- 本次只修复 SSH 主机指纹协商；真实远端安装、模型下载和 GPU 验证仍未接入，暂不要点击“确认并开始部署”。
+- `E-SSH-FINGERPRINT` 现在仅表示无法观察或解析主机公钥；认证失败仍返回 `E-SSH-AUTH` 或 `E-PERMISSION`。
+
+---
+
+## 2026-09-25 - v0.13.46 - SSH 主机指纹首次连接确认
+### 本次更新内容
+
+- SSH 扫描首次连接自动调用 `ssh-keyscan` 获取真实主机公钥指纹；首个请求只返回指纹，不执行远端探针。
+- 设置页收到 `E-SSH-FINGERPRINT` 后自动填入指纹并提示用户核对，用户勾选确认后再次点击扫描才会执行环境探针。
+- 私钥内容仅在单次 SSH 命令期间写入权限为 600 的临时文件，命令结束立即清理；密码-only 登录明确返回可操作的认证错误。
+
+### 验证方式
+
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`（126 项通过）
+- `python -m py_compile`（`console/*.py` 与 `workflows/*.py` 全部通过）
+- `python -m json.tool`（`recipes/*.json` 通过）
+- `git diff --check`
+
+### 影响与注意事项
+
+- 现有配置和 SQLite 数据结构不变；首次扫描会多一次只读的主机指纹获取请求。
+- 当前控制台不能安全地通过非交互 SSH 传递密码；请使用 SSH 私钥或已配置的 SSH Agent。密码-only 会在确认指纹后以 `E-SSH-AUTH` 明确拒绝，不会执行远端探针。
+- 本轮仍未执行真实 AutoDL/晨羽智云部署、模型下载或 GPU 验证；recipe 的真实远端安装适配器和资源摘要仍需后续接入。
+
+---
+
+## 2026-09-25 - v0.13.45 - 云端环境部署控制与重试状态同步
+### 本次更新内容
+
+- 设置页补齐环境部署控制事件：扫描、生成计划、开始部署、重试步骤、取消任务、凭据模式切换和配方加载均连接到后端接口。
+- 修复 `prepared_waiting_gpu` 状态下错误禁用重试按钮的问题；重试下拉框现在只展示失败步骤和等待 GPU 验证的步骤。
+- 修复手动重试后的任务状态同步：GPU 延迟验证成功会更新已完成/失败/延期步骤和任务状态，失败重试会保留失败状态并通过任务查询接口返回。
+
+### 验证方式
+
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`（120 项通过）
+- `python -m py_compile console\*.py workflows\*.py`
+- `python -m json.tool recipes\minimax-h3-sdxl.json`
+- `node --check`（以 UTF-8 提取的 `console/index.html` 内嵌脚本）
+- `git diff --check`
+
+### 影响与注意事项
+
+- 现有 SQLite 数据结构和启动方式不变；新增控制仅影响环境部署任务的前端操作与状态展示。
+- 当前仍未接入真实 AutoDL/晨羽智云远端安装命令、真实模型下载、工作流复制或真实 GPU 验证；这些步骤仍以可恢复的显式步骤和注入式验证器提供接口，不能据此宣称远端环境已完成部署。
+- SSH 密码、私钥和 API Key 仍只保存在当前 SSH 会话内存，不写入 SQLite、配置、日志或 manifest。
+
+---
+
+## 2026-09-25 - v0.13.44 - 云端环境管理 API 与部署状态机
+### 本次更新内容
+
+- 增加可恢复环境部署状态机：无 GPU 时完成 CPU/文件准备并停在 `prepared_waiting_gpu`，开卡后独立执行 SDXL、T2V、I2V、R2V 四项验证，全部通过才标记 `available`。
+- 增加部署步骤记录、取消、失败步骤重试和已校验模型跳过逻辑；部署 manifest 写入 SQLite，便于进程重启后查看。
+- 增加环境管理 API：扫描、计划、部署确认、任务查询、单步重试、取消、recipe 列表和 manifest 查询。
+- 所有远端凭据只存在当前 SSH 会话内存，API/日志响应使用脱敏内容；部署接口必须携带匹配的 recipe 版本和 `confirm: true`。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_deployer console.tests.test_environment_api console.tests.test_environment_api_routes -v`
+- `python -m py_compile console/batch_console.py console/environment_*.py`
+
+### 影响与注意事项
+
+- API 路由加载后需重启控制台服务；扫描不会触发安装或下载，部署确认后才会产生远端磁盘/流量/GPU 费用。
+- 首版安装步骤保留为显式可恢复步骤，recipe 适配器接入前不会覆盖已有 ComfyUI 启动脚本。
+
+## 2026-09-25 - v0.13.42 - 云端环境计划与可恢复下载
+### 本次更新内容
+
+- 增加环境计划器，按模型本体、临时下载、解压空间并预留 15% 余量，空间不足时直接返回 `E-DISK`，不创建下载任务。
+- 根据现有 ComfyUI/Python 版本自动选择复用或独立环境，并输出差异、风险、下载清单和预计剩余空间。
+- 增加 `.part` 断点下载、备用源切换、大小与 SHA256 校验、已验证文件复用和取消检查；校验失败不会提升临时文件。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_planner console.tests.test_environment_downloader -v`
+
+### 影响与注意事项
+
+- 下载目标必须提供真实的 64 位 SHA256；recipe 中的占位摘要不会被下载器视为已验证。
+- 下载器可注入传输函数，便于后端任务和离线测试复用；默认实现使用 HTTP Range 续传。
+
+## 2026-09-25 - v0.13.41 - 云端环境只读扫描与 MiniMax H3/SDXL 配方
+### 本次更新内容
+
+- 增加 AutoDL/晨羽智云环境的只读扫描器，收集 GPU、CUDA、磁盘、Python、ComfyUI、节点、模型、端口和进程摘要，并区分纯净系统、纯 ComfyUI 与整合包。
+- 增加 `minimax-h3-sdxl` 1.0.0 配方，声明 MiniMax H3 视频、SDXL 生图的工作流、四类 GPU 验证项、资源校验字段和 15% 余量所需的硬件门槛。
+- recipe 加载器拒绝绝对路径、缺少 SHA256/大小/备用源字段、非法资源模式及 URL 中的访问凭据。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_environment_scanner console.tests.test_environment_recipes -v`
+- `python -m json.tool recipes/minimax-h3-sdxl.json > $null`
+
+### 影响与注意事项
+
+- 扫描阶段只执行固定 probe，不安装、下载、重启或修改远端文件。
+- 配方中的零值 SHA256 表示供应商尚未提供可核对摘要；实际部署前下载器会拒绝将其视为已验证文件，需替换为官方摘要。
+
+## 2026-09-24 - v0.13.40 - 文生图测试需求输入与结果预览
+### 本次更新内容
+
+- 文生图诊断增加“测试生成需求”输入框，真实测试会把用户输入原样传给当前选择的 Agnes/OpenAI/Boogu 或 ComfyUI 生图流程。
+- 生成成功后在设置卡片内显示最新图片预览，并提供原图打开链接、提供商、模型、耗时、文件名和实际需求信息。
+- 新一次生成失败时保留上一张成功预览，同时在状态区显示本次失败原因，避免结果被清空。
+- ComfyUI SDXL 诊断工作流支持自定义提示词；云端图片适配器不再使用写死的测试提示词。
+- 修复输出目录中的 PNG/JPEG/WebP/GIF 被 `/media/` 错误按视频类型返回的问题，确保本地 ComfyUI 诊断图可以在浏览器预览。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_service_diagnostics console.tests.test_settings_diagnostics_ui console.tests.test_task_control_api -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- 浏览器模拟自定义提示词提交、图片加载、结果元数据及失败后保留旧预览。
+- `node --check`（提取后的前端脚本）
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- “检查当前生图接口”仍不会生成图片或产生生图费用；只有确认“真实生图测试”后才会提交生成。
+- 云端预览使用供应商返回的图片 URL；ComfyUI 预览使用已下载到输出目录的本地文件。
+- 更新后需重启控制台后端以加载自定义提示词参数和本地图片 MIME 类型修复，浏览器再执行 `Ctrl+F5`。
+
+## 2026-09-24 - v0.13.39 - 生图诊断入口去重与结果定位修复
+### 本次更新内容
+
+- ComfyUI 服务器区域删除重复的“测试生图”和旧“连接测试”，统一保留一个“检查连接”入口；视频工作流测试保持独立。
+- 文生图卡片作为唯一的生图诊断入口，“检查当前生图接口”只检查配置与连接，“真实生图测试”按当前选择的提供商实际生成图片。
+- 每个诊断按钮显式绑定结果提示区，修复 `needs_real_test` 覆盖“真实生图测试”按钮，以及两个 R2V 入口结果显示串位的问题。
+- 将常见诊断状态码转换为中文显示，不再直接展示 `needs_real_test` 等内部状态值。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_settings_diagnostics_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- 浏览器模拟免费检查与真实生图测试，确认按钮文字不变且结果进入 `diagImage`。
+- `node --check`（提取后的前端脚本）
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- ComfyUI 生图后端及 `comfyui_image` 诊断能力未删除；选择“ComfyUI 工作流”后，文生图卡片的真实测试仍会提交 SDXL 工作流。
+- 本次只收敛重复界面入口并修复结果显示位置，不修改已保存的模型配置。
+
+## 2026-09-24 - v0.13.38 - 设置抽屉宽度与模型字段布局优化
+### 本次更新内容
+
+- 设置抽屉扩大到桌面端最多 `720px`，增加内容区留白、层次和可读性。
+- 语言模型和图片模型的云端配置统一为“接口地址 → API Key → 模型”，接口地址与 API Key 在桌面端并排，模型单独占一行。
+- 窄屏自动切换为单列，同时保留接口地址、API Key、模型的填写顺序。
+- 修复 ComfyUI 服务器地址标签未闭合导致后续诊断区域结构异常的问题。
+- 修复文生图卡片被提前闭合导致 R2V 及底部设置脱离滚动区的问题，所有设置项现在统一对齐并随内容区整体滚动。
+
+### 验证方式
+
+- `python -m unittest console.tests.test_settings_diagnostics_ui -v`
+- `python -m unittest discover -s console/tests -p "test_*.py" -v`
+- `node --check`（提取后的前端脚本）
+- `python -m py_compile console/batch_console.py console/service_diagnostics.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 仅调整设置页的布局和标签结构，原有配置字段 ID、保存逻辑及接口地址不变。
+- 更新页面后如仍显示旧布局，请在浏览器执行 `Ctrl+F5` 强制刷新。
+
 ## 2026-09-24 - v0.13.37 - Windows 启动脚本清理旧控制台
 ### 本次更新内容
 

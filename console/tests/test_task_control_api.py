@@ -39,6 +39,18 @@ class TaskControlApiTests(unittest.TestCase):
         self.assertIn("confirm_cost", source)
         self.assertIn("message", source)
 
+    def test_real_diagnostic_route_forwards_custom_parameters(self):
+        source = Path(batch_console.__file__).read_text(encoding="utf-8")
+        real_route = source.split('if path == "/api/diagnostics/real":', 1)[1].split('if path == "/api/llm/chat":', 1)[0]
+        self.assertIn('parameters=body.get("parameters")', real_route)
+
+    def test_output_media_route_serves_generated_images_as_images(self):
+        source = Path(batch_console.__file__).read_text(encoding="utf-8")
+        outputs_route = source.split("# 生成视频：递归查 outputs 目录", 1)[1].split('self._send(404, json.dumps({"error": "not found"}', 1)[0]
+        self.assertIn('"image/png"', outputs_route)
+        self.assertIn('"image/jpeg"', outputs_route)
+        self.assertIn('"image/webp"', outputs_route)
+
 
 if __name__ == "__main__":
     unittest.main()

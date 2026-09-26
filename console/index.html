@@ -174,17 +174,19 @@
   /* ---------- 抽屉 ---------- */
   .drawer-bg { position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 90; display: none; }
   .drawer {
-    position: fixed; top: 0; right: 0; height: 100vh; width: min(420px, 92vw);
-    background: #fff; z-index: 91; box-shadow: -12px 0 40px rgba(15,23,42,.15);
+    position: fixed; top: 0; right: 0; height: 100vh; width: min(720px, calc(100vw - 24px));
+    background: linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%); z-index: 91;
+    box-shadow: -18px 0 50px rgba(15,23,42,.18);
     transform: translateX(105%); transition: transform .25s ease; display: flex; flex-direction: column;
   }
   .drawer.open { transform: none; }
   .drawer .d-head {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 22px; border-bottom: 1px solid var(--line); font-weight: 700;
+    padding: 20px 30px; border-bottom: 1px solid rgba(210,220,235,.9); font-weight: 700;
+    background: rgba(255,255,255,.9); font-size: 16px; letter-spacing: .2px;
   }
-  .drawer .d-body { padding: 20px 22px; overflow: auto; flex: 1; }
-  .drawer .d-body label.field { margin-bottom: 16px; }
+  .drawer .d-body { padding: 26px 30px 44px; overflow: auto; flex: 1; }
+  .drawer .d-body > label.field { margin-bottom: 18px; }
   .toast {
     position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
     background: #fff; border: 1px solid var(--line); border-radius: 12px;
@@ -230,14 +232,26 @@
   .ast-in { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; width: 100%; background: #fff; }
   .ast-ref { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ast-ok { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
-  .cfg-block { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 12px 0; background: #fff; }
-  .cfg-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .cfg-block { border: 1px solid rgba(213,222,235,.95); border-radius: 14px; padding: 18px; margin: 0 0 18px; background: rgba(255,255,255,.96); box-shadow: 0 8px 24px rgba(49,73,108,.06); }
+  .cfg-title { font-size: 14px; font-weight: 700; margin-bottom: 14px; color: #253449; }
   .setting-choice { display: grid !important; grid-template-columns: minmax(7em, auto) minmax(0, 1fr); align-items: center; gap: 8px; white-space: nowrap; }
   .setting-choice > select, .setting-choice > input { min-width: 0; width: 100%; }
-  .provider-box { margin-top: 8px; }
+  .provider-box { margin-top: 12px; }
+  .provider-fields { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(210px, .9fr); gap: 14px 16px; }
+  .provider-fields label.field { min-width: 0; margin-bottom: 0 !important; }
+  .provider-fields .provider-url, .provider-fields .provider-key { grid-row: 1; }
+  .provider-fields .provider-model { grid-column: 1 / -1; }
   .diag-inline { display: grid; grid-template-columns: repeat(auto-fit,minmax(128px,1fr)); gap: 7px; align-items: center; margin: 8px 0 12px; }
   .diag-inline .btn { min-height: 34px; white-space: nowrap; }
   .diag-inline .hint { grid-column: 1 / -1; min-height: 18px; }
+  .diag-image-test { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .diag-image-test textarea { width: 100%; min-height: 76px; }
+  .diag-image-preview { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 12px; }
+  .diag-image-frame { display: block; width: 100%; aspect-ratio: 1; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #f1f4f9; }
+  .diag-image-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .diag-image-details { min-width: 0; padding-top: 2px; }
+  .diag-image-details strong { display: block; margin-bottom: 7px; font-size: 13px; }
+  .diag-image-details .hint { white-space: pre-line; word-break: break-all; }
   .llm-chat-panel { border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; padding: 10px; margin-top: 8px; }
   .llm-chat-messages { display: flex; flex-direction: column; gap: 7px; max-height: 260px; overflow: auto; margin-bottom: 8px; }
   .llm-chat-message { max-width: 92%; padding: 7px 9px; border-radius: 8px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
@@ -247,12 +261,52 @@
   .llm-chat-input textarea { flex: 1; min-width: 0; min-height: 58px; font-size: 12px; }
   .llm-chat-actions { display: flex; flex-direction: column; gap: 6px; }
   .diag-group-title { font-size: 11px; color: var(--muted); margin: 8px 0 2px; }
+  .environment-panel { margin-top: 18px; }
+  .environment-panel .cfg-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .environment-panel .cfg-title small { font-size:11px; font-weight:400; color:var(--muted); }
+  .environment-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .environment-grid .wide { grid-column:1 / -1; }
+  .environment-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  .environment-summary { border:1px solid var(--line); border-radius:9px; background:#f8fafc; padding:10px 12px; margin-top:10px; font-size:12px; line-height:1.7; white-space:pre-line; word-break:break-word; }
+  .environment-summary.ok { border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.05); }
+  .environment-summary.warn { border-color:rgba(245,158,11,.35); background:rgba(245,158,11,.06); }
+  .environment-summary.error { border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.05); color:var(--red); }
+  .environment-steps { display:grid; gap:6px; margin-top:10px; }
+  .environment-step { display:grid; grid-template-columns:minmax(150px,1fr) auto minmax(0,1.7fr); gap:8px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:7px 9px; background:#fff; font-size:11px; }
+  .environment-step .name { font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .environment-step .status { font-weight:600; white-space:nowrap; }
+  .environment-step .detail { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .environment-step.succeeded .status { color:var(--green); }
+  .environment-step.failed .status { color:var(--red); }
+  .environment-step.deferred .status { color:var(--yellow); }
+  .environment-verification { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-top:10px; }
+  .environment-verification .item { border:1px solid var(--line); border-radius:8px; padding:8px; background:#fff; font-size:11px; }
+  .environment-verification .item strong { display:block; margin-bottom:4px; }
+  .environment-verification .item.ok { border-color:rgba(34,197,94,.35); color:#15803d; }
+  .environment-verification .item.bad { border-color:rgba(239,68,68,.35); color:var(--red); }
+  .environment-code { font-family:ui-monospace,monospace; font-size:11px; word-break:break-all; }
   .proj-bar { flex: 0 0 150px; height: 7px; border-radius: 999px; background: var(--border);
     overflow: hidden; }
   .proj-bar span { display: block; height: 100%; border-radius: 999px;
     background: linear-gradient(90deg, var(--primary), var(--primary2)); }
   .proj-prog-label { font-size: 12px; color: #93c5fd; font-weight: 600; }
   .proj-actions { flex-shrink: 0; }
+  @media (max-width: 620px) {
+    .drawer { width: calc(100vw - 12px); }
+    .drawer .d-head { padding: 17px 20px; }
+    .drawer .d-body { padding: 20px 18px 34px; }
+    .cfg-block { padding: 15px; }
+    .provider-fields { grid-template-columns: 1fr; gap: 12px; }
+    .provider-fields .provider-url, .provider-fields .provider-key { grid-row: auto; }
+    .provider-fields .provider-model { grid-column: auto; }
+    .diag-image-preview { grid-template-columns: 1fr; }
+    .diag-image-frame { max-width: 280px; }
+    .environment-grid { grid-template-columns:1fr; }
+    .environment-grid .wide { grid-column:auto; }
+    .environment-verification { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .environment-step { grid-template-columns:1fr auto; }
+    .environment-step .detail { grid-column:1 / -1; }
+  }
 </style>
 </head>
 <body>
@@ -572,14 +626,56 @@
   <div class="d-body">
     <label class="field">ComfyUI 服务器地址
       <input type="text" id="serverInput" placeholder="http://127.0.0.1:8188">
-    <div class="diag-group-title">连接与生图</div>
-    <div class="diag-inline"><button class="btn" data-diagnostic="comfyui" data-diagnostic-action="quick">检查配置</button><button class="btn blue" data-diagnostic="comfyui_image" data-diagnostic-action="real">测试生图</button><span id="diagComfyui" class="hint">检查地址、GPU、队列及输出</span></div>
-    <div class="diag-group-title">视频工作流</div>
-    <div class="diag-inline"><button class="btn blue" data-diagnostic="comfyui_t2v" data-diagnostic-action="real">测试 T2V</button><button class="btn blue" data-diagnostic="comfyui_i2v" data-diagnostic-action="real">测试 I2V</button><button class="btn blue" data-diagnostic="comfyui_r2v" data-diagnostic-action="real">测试 R2V</button><span id="diagComfyuiVideo" class="hint">会使用 GPU 生成短测试片段</span></div>
     </label>
-    <div class="row">
-      <button class="btn" id="btnCheck">连接测试</button>
-      <span id="connInfo" style="font-size:12px;color:var(--muted)"><span class="dot"></span>未测试</span>
+    <div class="diag-group-title">ComfyUI 连接</div>
+    <div class="diag-inline"><button class="btn" data-diagnostic="comfyui" data-diagnostic-action="quick" data-diagnostic-target="diagComfyui">检查连接</button><span id="diagComfyui" class="hint">检查地址、GPU、显存和队列</span></div>
+    <div class="diag-group-title">视频工作流</div>
+    <div class="diag-inline"><button class="btn blue" data-diagnostic="comfyui_t2v" data-diagnostic-action="real" data-diagnostic-target="diagComfyuiVideo">测试 T2V</button><button class="btn blue" data-diagnostic="comfyui_i2v" data-diagnostic-action="real" data-diagnostic-target="diagComfyuiVideo">测试 I2V</button><button class="btn blue" data-diagnostic="comfyui_r2v" data-diagnostic-action="real" data-diagnostic-target="diagComfyuiVideo">测试 R2V</button><span id="diagComfyuiVideo" class="hint">会使用 GPU 生成短测试片段</span></div>
+    <div class="cfg-block environment-panel" id="environmentPanel">
+      <div class="cfg-title"><span>☁️ 云端环境部署</span><small>凭据仅用于本次扫描，不写入配置</small></div>
+      <div class="hint">先扫描远端环境，再生成空间估算和部署计划。无 GPU 时最多准备文件，状态会停在“等待 GPU 验证”。</div>
+      <div class="environment-grid" style="margin-top:12px">
+        <label class="field">云平台
+          <select id="environmentPlatform"><option value="autodl">AutoDL</option><option value="chenyu">晨羽智云</option></select>
+        </label>
+        <label class="field">部署配方
+          <select id="environmentRecipe"><option value="">请先读取配方</option></select>
+        </label>
+        <label class="field wide">SSH 登录命令
+          <input type="text" id="environmentSshCommand" placeholder="ssh -p 18078 root@connect.example.com" autocomplete="off">
+        </label>
+        <label class="field">SSH 密码
+          <input type="password" id="environmentPassword" autocomplete="new-password" placeholder="仅本次扫描使用">
+        </label>
+        <label class="field">数据盘路径
+          <input type="text" id="environmentDataPath" value="/root/autodl-tmp" placeholder="/root/autodl-tmp">
+        </label>
+        <label class="field">ComfyUI 路径
+          <input type="text" id="environmentComfyPath" value="/root/ComfyUI" placeholder="/root/ComfyUI">
+        </label>
+      </div>
+      <div class="environment-actions">
+        <button class="btn blue" id="btnEnvironmentScan">扫描远端环境</button>
+        <button class="btn" id="btnEnvironmentRetrust" style="display:none">重新建立信任</button>
+        <span id="environmentScanStatus" class="hint">尚未扫描</span>
+      </div>
+      <div id="environmentScanSummary" class="environment-summary">扫描结果会显示 GPU、磁盘、Python、ComfyUI 和已有节点摘要。</div>
+      <div class="environment-actions">
+        <button class="btn" id="btnEnvironmentPlan" disabled>生成部署计划</button>
+        <button class="btn green" id="btnEnvironmentDeploy" disabled>确认并开始部署</button>
+      </div>
+      <div id="environmentPlanSummary" class="environment-summary">完成扫描后生成部署计划。</div>
+      <div class="environment-actions">
+        <label class="field" style="flex:1 1 210px">失败步骤
+          <select id="environmentRetryStep"><option value="">选择要重试的步骤</option></select>
+        </label>
+        <button class="btn" id="btnEnvironmentRetry" disabled>重试步骤</button>
+        <button class="btn" id="btnEnvironmentCancel" disabled>取消任务</button>
+      </div>
+      <div id="environmentJobSteps" class="environment-steps"><div class="hint">部署后会显示每个 CPU 准备和 GPU 验证步骤。</div></div>
+      <div id="environmentVerificationResults" class="environment-verification"><div class="item"><strong>SDXL</strong>未开始</div><div class="item"><strong>T2V</strong>未开始</div><div class="item"><strong>I2V</strong>未开始</div><div class="item"><strong>R2V</strong>未开始</div></div>
+      <div class="hint" style="margin-top:12px">环境清单</div>
+      <pre id="environmentManifest" class="environment-summary environment-code">部署完成后显示 manifest。</pre>
     </div>
     <div class="cfg-block">
       <div class="cfg-title">🧠 语言模型（剧本/提示词）</div>
@@ -597,15 +693,17 @@
             <option value="dashscope">通义千问（DashScope 原生）</option>
           </select>
         </label>
-        <label class="field">云端接口地址（base_url）
-          <input type="text" id="llmCloudUrl" placeholder="https://api.openai.com/v1">
-        </label>
-        <label class="field">云端模型名
-          <input type="text" id="llmCloudModel" placeholder="gpt-4o-mini / deepseek-chat / qwen-max">
-        </label>
-        <label class="field">云端 API Key
-          <input type="password" id="llmCloudKey" placeholder="sk-...">
-        </label>
+        <div class="provider-fields">
+          <label class="field provider-url">云端接口地址（base_url）
+            <input type="text" id="llmCloudUrl" placeholder="https://api.openai.com/v1">
+          </label>
+          <label class="field provider-key">云端 API Key
+            <input type="password" id="llmCloudKey" placeholder="sk-...">
+          </label>
+          <label class="field provider-model">云端模型名
+            <input type="text" id="llmCloudModel" placeholder="gpt-4o-mini / deepseek-chat / qwen-max">
+          </label>
+        </div>
       </div>
       <div id="llmLocalBox" class="provider-box">
         <label class="field">本地模型地址
@@ -615,7 +713,7 @@
           <input type="text" id="llmLocalModel" placeholder="qwen3.6-27b-abliterated-mlx">
         </label>
       </div>
-      <div class="diag-inline"><button class="btn" data-diagnostic="llm" data-diagnostic-action="quick">免费检查 LLM</button><button class="btn blue" data-diagnostic="llm" data-diagnostic-action="real">真实对话测试</button><span id="diagLlm" class="hint">读取当前 LLM 配置</span></div>
+      <div class="diag-inline"><button class="btn" data-diagnostic="llm" data-diagnostic-action="quick" data-diagnostic-target="diagLlm">免费检查 LLM</button><button class="btn blue" data-diagnostic="llm" data-diagnostic-action="real" data-diagnostic-target="diagLlm">真实对话测试</button><span id="diagLlm" class="hint">读取当前 LLM 配置</span></div>
       <div id="llmChatPanel" class="llm-chat-panel" style="display:none">
         <div id="llmChatMessages" class="llm-chat-messages"></div>
         <div class="llm-chat-input">
@@ -645,25 +743,26 @@
           <option value="dashscope">通义万相（DashScope 异步）</option>
           </select>
         </label>
-        <label class="field">云端接口地址（base_url）
-          <input type="text" id="imgCloudUrl" placeholder="https://api.openai.com/v1">
-        </label>
-        <label class="field">云端图片模型
-          <select id="imgCloudModelSelect">
-            <option value="gpt-image-1" data-provider="openai">gpt-image-1</option>
-            <option value="gpt-image-1-mini" data-provider="openai">gpt-image-1-mini</option>
-            <option value="dall-e-3" data-provider="openai">dall-e-3</option>
-            <option value="agnes-image-2.5-flash" data-provider="agnes">agnes-image-2.5-flash</option>
-            <option value="agnes-image-2.5" data-provider="agnes">agnes-image-2.5</option>
-            <option value="wanx-v1" data-provider="dashscope">wanx-v1</option>
-            <option value="__custom__">自定义模型</option>
-          </select>
-          <input type="text" id="imgCloudModel" placeholder="输入自定义模型名称" style="display:none">
-        </label>
-        <label class="field">云端 API Key
-          <input type="password" id="imgCloudKey" placeholder="sk-...">
-        </label>
-      </div>
+        <div class="provider-fields">
+          <label class="field provider-url">云端接口地址（base_url）
+            <input type="text" id="imgCloudUrl" placeholder="https://api.openai.com/v1">
+          </label>
+          <label class="field provider-key">云端 API Key
+            <input type="password" id="imgCloudKey" placeholder="sk-...">
+          </label>
+          <label class="field provider-model">云端图片模型
+            <select id="imgCloudModelSelect">
+              <option value="gpt-image-1" data-provider="openai">gpt-image-1</option>
+              <option value="gpt-image-1-mini" data-provider="openai">gpt-image-1-mini</option>
+              <option value="dall-e-3" data-provider="openai">dall-e-3</option>
+              <option value="agnes-image-2.5-flash" data-provider="agnes">agnes-image-2.5-flash</option>
+              <option value="agnes-image-2.5" data-provider="agnes">agnes-image-2.5</option>
+              <option value="wanx-v1" data-provider="dashscope">wanx-v1</option>
+              <option value="__custom__">自定义模型</option>
+            </select>
+            <input type="text" id="imgCloudModel" placeholder="输入自定义模型名称" style="display:none">
+          </label>
+        </div>
       </div>
       <div id="imgLocalBox" class="provider-box">
         <label class="field">本地生图地址
@@ -676,7 +775,21 @@
         </label>
         <div class="hint">使用上方 ComfyUI 服务器地址，通过 SDXL 工作流生成图片。</div>
       </div>
-      <div class="diag-inline"><button class="btn" data-diagnostic="image" data-diagnostic-action="quick">检查当前生图接口</button><button class="btn blue" data-diagnostic="image" data-diagnostic-action="real">真实生图测试</button><span id="diagImage" class="hint">会根据当前提供商执行测试</span></div>
+      <div class="diag-image-test">
+        <label class="field">测试生成需求
+          <textarea id="imgDiagnosticPrompt" rows="3" maxlength="4000">电影感产品主视觉，干净布光，主体清晰，细节丰富</textarea>
+        </label>
+        <div class="diag-inline"><button class="btn" data-diagnostic="image" data-diagnostic-action="quick" data-diagnostic-target="diagImage">检查当前生图接口</button><button class="btn blue" data-diagnostic="image" data-diagnostic-action="real" data-diagnostic-target="diagImage">真实生图测试</button><span id="diagImage" class="hint">会根据当前提供商和上方需求执行测试</span></div>
+        <div id="diagImagePreview" class="diag-image-preview" style="display:none">
+          <a id="diagImageLink" class="diag-image-frame" href="#" target="_blank" rel="noopener" title="打开原图">
+            <img id="diagImageOutput" alt="生图测试输出">
+          </a>
+          <div class="diag-image-details">
+            <strong>最新生成结果</strong>
+            <div id="diagImageMeta" class="hint"></div>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="cfg-block">
       <div class="cfg-title">🎬 R2V（Ref2VA）模型（参考图出片）</div>
@@ -685,7 +798,7 @@
       </label>
       <label class="field">CLIP 文本编码器（models/text_encoders 下的文件名）
         <input type="text" id="r2vClip" placeholder="qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors">
-        <div class="diag-inline"><button class="btn blue" data-diagnostic="comfyui_r2v" data-diagnostic-action="real">测试 R2V 工作流</button><span id="diagR2v" class="hint">会使用 GPU 生成测试片段</span></div>
+        <div class="diag-inline"><button class="btn blue" data-diagnostic="comfyui_r2v" data-diagnostic-action="real" data-diagnostic-target="diagR2v">测试 R2V 工作流</button><span id="diagR2v" class="hint">会使用 GPU 生成测试片段</span></div>
       </label>
       <div class="hint">提交 R2V 时自动检测服务器上的权重，缺失则回退 FL2VA 并提示。</div>
     </div>
@@ -2104,17 +2217,6 @@ async function clearHistory() {
 // ---------- 设置 ----------
 function openDrawer() { $('settingsDrawer').classList.add('open'); $('drawerBg').style.display = 'block'; }
 function closeDrawer() { $('settingsDrawer').classList.remove('open'); $('drawerBg').style.display = 'none'; }
-async function checkConn() {
-  const server = $('serverInput').value.trim();
-  $('connInfo').innerHTML = '<span class="dot"></span>测试中…';
-  try {
-    const r = await fetch('/api/check', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({server})});
-    const d = await r.json();
-    $('connInfo').innerHTML = d.ok
-      ? `<span class="dot ok"></span>在线 · 排队${d.queue_pending} 运行${d.queue_running}`
-      : `<span class="dot bad"></span>失败：${esc(d.error)}`;
-  } catch (e) { $('connInfo').innerHTML = `<span class="dot bad"></span>请求失败：${esc(e.message)}`; }
-}
 async function checkLlm() {
   const el = $('llmStatusLine');
   el.textContent = '检测中…';
@@ -2170,6 +2272,245 @@ async function collectConfigFromForm() {
   cfg.image_gen.cloud = Object.assign({}, cfg.image_gen.cloud, {base_url:$('imgCloudUrl').value.trim(), model:selectedImageModel(), api_key:$('imgCloudKey').value.trim()});
   cfg.image_gen.comfyui = Object.assign({}, cfg.image_gen.comfyui, {server:$('serverInput').value.trim(), checkpoint:$('imgComfyuiCheckpoint').value.trim()});
   return cfg;
+}
+
+// ---------- 云端环境部署 ----------
+let environmentState = {targetId:'', scanId:'', plan:null, job:null, pollTimer:null};
+const environmentSshCommandStorageKey = 'toonflow.environment.sshCommand';
+async function loadSavedEnvironmentSshCommand() {
+  const input = $('environmentSshCommand');
+  if (!input) return;
+  try {
+    const localSaved = localStorage.getItem(environmentSshCommandStorageKey) || '';
+    const response = await fetch('/api/environment/ssh-command');
+    const data = response.ok ? await response.json() : {};
+    const saved = String(data.ssh_command || localSaved || '').trim();
+    if (saved && !input.value.trim()) input.value = saved;
+    if (saved && saved !== localSaved) localStorage.setItem(environmentSshCommandStorageKey, saved);
+  } catch (_) {}
+}
+function saveEnvironmentSshCommand() {
+  const input = $('environmentSshCommand');
+  if (!input) return;
+  try {
+    const command = input.value.trim();
+    if (command) localStorage.setItem(environmentSshCommandStorageKey, command);
+    else localStorage.removeItem(environmentSshCommandStorageKey);
+  } catch (_) {}
+}
+async function persistEnvironmentSshCommand() {
+  saveEnvironmentSshCommand();
+  const input = $('environmentSshCommand');
+  if (!input) return;
+  try {
+    await fetch('/api/environment/ssh-command', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ssh_command: input.value.trim()}),
+    });
+  } catch (_) {}
+}
+const environmentStepNames = ['scan', 'prepare_dirs', 'create_venv', 'install_comfyui', 'install_nodes', 'download_models', 'configure_shared_models', 'copy_workflows', 'manifest', 'verify_sdxl', 'verify_t2v', 'verify_i2v', 'verify_r2v'];
+const environmentStepLabels = {scan:'扫描', prepare_dirs:'准备目录', create_venv:'创建虚拟环境', install_comfyui:'安装 ComfyUI', install_nodes:'安装节点', download_models:'下载模型', configure_shared_models:'配置共享模型', copy_workflows:'复制工作流', manifest:'生成环境清单', verify_sdxl:'验证 SDXL', verify_t2v:'验证 T2V', verify_i2v:'验证 I2V', verify_r2v:'验证 R2V'};
+function environmentFormatBytes(value) {
+  const n = Number(value || 0);
+  if (n < 1024) return `${n} B`;
+  const units = ['KB','MB','GB','TB']; let x = n;
+  for (const unit of units) { x /= 1024; if (x < 1024) return `${x.toFixed(x >= 10 ? 0 : 1)} ${unit}`; }
+  return `${x.toFixed(1)} PB`;
+}
+function environmentSetSummary(id, text, kind='') {
+  const box = $(id); if (!box) return;
+  box.textContent = text || '';
+  box.className = `environment-summary${kind ? ' ' + kind : ''}`;
+}
+async function loadEnvironmentRecipes() {
+  try {
+    const r = await fetch('/api/environments/recipes');
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '配方加载失败');
+    const select = $('environmentRecipe');
+    select.innerHTML = (d.recipes || []).map(item => `<option value="${escAttr(item.id)}">${esc(item.id)} · v${esc(item.version || '')}</option>`).join('') || '<option value="">没有可用配方</option>';
+  } catch (e) {
+    environmentSetSummary('environmentPlanSummary', '配方加载失败：' + e.message, 'error');
+  }
+}
+function environmentScanPayload(retrust = false) {
+  saveEnvironmentSshCommand();
+  return {
+    platform: $('environmentPlatform').value,
+    ssh_command: $('environmentSshCommand').value.trim(),
+    data_path: $('environmentDataPath').value.trim(),
+    comfy_path: $('environmentComfyPath').value.trim(),
+    password: $('environmentPassword').value,
+    retrust: Boolean(retrust),
+  };
+}
+function renderEnvironmentScan(scan) {
+  scan = scan || {};
+  const gpu = scan.gpu || {};
+  const disk = scan.disk || {};
+  const python = scan.python || {};
+  const comfy = scan.comfyui || {};
+  const installedModels = Array.isArray(comfy.models) ? comfy.models : [];
+  const installedNodes = Array.isArray(comfy.nodes) ? comfy.nodes : [];
+  const gpuText = scan.has_gpu ? `${gpu.name || 'GPU'}${gpu.memory_bytes ? ' · ' + environmentFormatBytes(gpu.memory_bytes) : ''}` : '未检测到 GPU（可先准备文件）';
+  const lines = [
+    `环境类型：${scan.environment_kind || 'unknown'} · 平台：${scan.platform || 'unknown'}`,
+    `GPU：${gpuText}${gpu.cuda ? ' · CUDA ' + gpu.cuda : ''}`,
+    `数据盘：可用 ${environmentFormatBytes(disk.free_bytes)}${disk.path ? ' · ' + disk.path : ''}`,
+    `Python：${python.version || '未检测到'} · ComfyUI：${comfy.version || (comfy.present ? '已存在' : '未检测到')}`,
+    `已安装模型：${installedModels.length} 个${installedModels.length ? ' · ' + installedModels.slice(0, 8).map(item => item.filename).join('、') : ''}`,
+    `已安装节点：${installedNodes.length} 个${installedNodes.length ? ' · ' + installedNodes.slice(0, 8).map(item => item.filename).join('、') : ''}`,
+  ];
+  environmentSetSummary('environmentScanSummary', lines.join('\n'), 'ok');
+}
+async function scanEnvironment(retrust = false) {
+  await persistEnvironmentSshCommand();
+  const payload = environmentScanPayload(retrust);
+  if (!payload.ssh_command) { environmentSetSummary('environmentScanSummary', '请先填写 SSH 登录命令。', 'error'); return; }
+  $('btnEnvironmentScan').disabled = true;
+  $('environmentScanStatus').textContent = '扫描中…';
+  try {
+    const r = await fetch('/api/environments/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { throw new Error(raw || `HTTP ${r.status}`); }
+    if (!r.ok) {
+      if (d.error_code === 'E-SSH-FINGERPRINT' && d.details?.can_retrust) {
+        $('environmentScanStatus').textContent = '等待重新建立信任';
+        $('btnEnvironmentRetrust').style.display = '';
+        environmentSetSummary(
+          'environmentScanSummary',
+          '服务器身份发生变化，请确认当前云实例后点击“重新建立信任”。',
+          'warn',
+        );
+        return;
+      }
+      throw new Error(`${d.error_code || 'E-SSH-AUTH'}：${d.error || '扫描失败'}`);
+    }
+    environmentState.targetId = d.target_id || '';
+    environmentState.scanId = d.scan_id || '';
+    environmentState.plan = null;
+    $('btnEnvironmentPlan').disabled = !environmentState.targetId || !environmentState.scanId;
+    $('btnEnvironmentDeploy').disabled = true;
+    $('btnEnvironmentRetrust').style.display = 'none';
+    renderEnvironmentScan(d.scan);
+    $('environmentScanStatus').textContent = '扫描完成';
+    environmentSetSummary('environmentPlanSummary', '扫描完成，点击“生成部署计划”。');
+  } catch (e) {
+    $('environmentScanStatus').textContent = '扫描失败';
+    environmentSetSummary('environmentScanSummary', e.message, 'error');
+  } finally { $('btnEnvironmentScan').disabled = false; }
+}
+async function retrustEnvironment() {
+  await scanEnvironment(true);
+}
+async function loadEnvironmentPlan() {
+  if (!environmentState.targetId || !environmentState.scanId) return;
+  const recipeId = $('environmentRecipe').value;
+  if (!recipeId) { environmentSetSummary('environmentPlanSummary', '请先选择部署配方。', 'warn'); return; }
+  $('btnEnvironmentPlan').disabled = true;
+  try {
+    const r = await fetch('/api/environments/plan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({target_id:environmentState.targetId, scan_id:environmentState.scanId, recipe_id:recipeId})});
+    const d = await r.json(); if (!r.ok) throw new Error(`${d.error_code || 'E-WORKFLOW'}：${d.error || '计划生成失败'}`);
+    environmentState.plan = d;
+    const estimate = d.estimate || {};
+    const lines = [`状态：${d.status || 'unknown'} · 模式：${d.mode || 'unknown'}`, `空间：需要 ${environmentFormatBytes(estimate.required_bytes)}（模型 ${environmentFormatBytes(estimate.content_bytes)}，临时 ${environmentFormatBytes(estimate.temporary_bytes)}，解压 ${environmentFormatBytes(estimate.extract_bytes)}）`, `剩余：${environmentFormatBytes(d.remaining_bytes)}`];
+    const reused = Array.isArray(d.reused_resources) ? d.reused_resources : [];
+    if (reused.length) lines.push(`复用已安装资源：${reused.length} 个 · ${reused.slice(0, 8).map(item => item.filename).join('、')}`);
+    if ((d.differences || []).length) lines.push('差异：' + d.differences.join('；'));
+    if ((d.risks || []).length) lines.push('注意：' + d.risks.join('；'));
+    if (d.error) lines.push(`错误：${d.error.message || d.error}`);
+    if (d.status === 'blocked') {
+      lines.push('当前没有创建部署任务：请先按错误提示处理磁盘或连接问题，再重新扫描并生成计划；“重试步骤/取消任务”只在部署任务启动后可用。');
+    }
+    environmentSetSummary('environmentPlanSummary', lines.join('\n'), d.status === 'blocked' ? 'error' : 'ok');
+    $('btnEnvironmentDeploy').disabled = d.status !== 'plan_ready';
+    const tasks = (d.download_tasks || []).map(item => item.filename).filter(Boolean);
+    $('environmentRetryStep').innerHTML = '<option value="">选择要重试的步骤</option>' + environmentStepNames.map(step => `<option value="${step}">${environmentStepLabels[step] || step}</option>`).join('');
+    if (tasks.length) $('environmentPlanSummary').textContent += `\n需要下载：${tasks.join('、')}`;
+  } catch (e) { environmentSetSummary('environmentPlanSummary', e.message, 'error'); }
+  finally { $('btnEnvironmentPlan').disabled = false; }
+}
+function renderEnvironmentJob(job) {
+  environmentState.job = job || null;
+  const result = (job && job.result) || job || {};
+  const completed = new Set(result.completed_steps || []);
+  const failed = new Set(result.failed_steps || []);
+  const deferred = new Set(result.deferred_steps || []);
+  const messages = result.messages || [];
+  const retryableSteps = environmentStepNames.filter(step => failed.has(step) || deferred.has(step));
+  const retrySelect = $('environmentRetryStep');
+  const selectedRetryStep = retrySelect.value;
+  retrySelect.innerHTML = '<option value="">选择要重试的步骤</option>' + retryableSteps
+    .map(step => `<option value="${escAttr(step)}">${esc(environmentStepLabels[step] || step)}</option>`).join('');
+  if (retryableSteps.includes(selectedRetryStep)) retrySelect.value = selectedRetryStep;
+  const activeStep = result.active_step || '';
+  $('environmentJobSteps').innerHTML = environmentStepNames.map(step => {
+    const status = failed.has(step) ? 'failed' : completed.has(step) ? 'succeeded' : deferred.has(step) ? 'deferred' : 'queued';
+    const running = status === 'queued' && step === activeStep;
+    const label = status === 'succeeded' ? '已完成' : status === 'failed' ? '失败' : status === 'deferred' ? '等待 GPU' : running ? '执行中' : '待执行';
+    const detail = messages.find(item => String(item).startsWith(step + ':')) || '';
+    return `<div class="environment-step ${status} ${running ? 'running' : ''}"><span class="name">${esc(environmentStepLabels[step] || step)}</span><span class="status">${label}</span><span class="detail">${esc(detail)}</span></div>`;
+  }).join('');
+  const terminal = ['available','failed','blocked','prepared_waiting_gpu','interrupted'].includes(job?.status);
+  $('btnEnvironmentRetry').disabled = !job || terminal && !failed.size && !deferred.size;
+  $('btnEnvironmentCancel').disabled = !job || terminal;
+  renderEnvironmentVerification(job);
+}
+function renderEnvironmentVerification(job) {
+  const result = (job && job.result) || job || {};
+  const completed = new Set(result.completed_steps || []);
+  const failed = new Set(result.failed_steps || []);
+  const deferred = new Set(result.deferred_steps || []);
+  const services = [['verify_sdxl','SDXL'],['verify_t2v','T2V'],['verify_i2v','I2V'],['verify_r2v','R2V']];
+  $('environmentVerificationResults').innerHTML = services.map(([step,label]) => {
+    const ok = completed.has(step), bad = failed.has(step), wait = deferred.has(step);
+    return `<div class="item ${ok ? 'ok' : bad ? 'bad' : ''}"><strong>${label}</strong>${ok ? '验证通过' : bad ? '验证失败，可重试' : wait ? '等待 GPU' : '未开始'}</div>`;
+  }).join('');
+}
+async function pollEnvironmentJob(jobId) {
+  if (!jobId) return;
+  try {
+    const r = await fetch('/api/environments/jobs/' + encodeURIComponent(jobId));
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || '任务查询失败');
+    renderEnvironmentJob(d.job);
+    const status = d.job?.status;
+    if (!['available','failed','blocked','prepared_waiting_gpu','interrupted'].includes(status)) {
+      environmentState.pollTimer = setTimeout(() => pollEnvironmentJob(jobId), 1500);
+    } else if (environmentState.targetId) {
+      const m = await fetch('/api/environments/manifest/' + encodeURIComponent(environmentState.targetId));
+      if (m.ok) { const md = await m.json(); $('environmentManifest').textContent = JSON.stringify(md.manifest || {}, null, 2); }
+    }
+  } catch (e) { environmentSetSummary('environmentPlanSummary', '任务查询失败：' + e.message, 'error'); }
+}
+async function deployEnvironment() {
+  const plan = environmentState.plan;
+  if (!plan || !plan.plan_id) return;
+  if (!confirm('部署会下载模型、占用远端磁盘并在有 GPU 时执行四项验证，确定继续吗？')) return;
+  $('btnEnvironmentDeploy').disabled = true;
+  try {
+    const r = await fetch('/api/environments/deploy', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({plan_id:plan.plan_id, recipe_version:plan.recipe_version, confirm:true})});
+    const d = await r.json(); if (!r.ok) throw new Error(`${d.error_code || 'E-WORKFLOW'}：${d.error || '部署提交失败'}`);
+    renderEnvironmentJob(d.job); pollEnvironmentJob(d.job?.job_id || plan.plan_id);
+  } catch (e) { environmentSetSummary('environmentPlanSummary', e.message, 'error'); $('btnEnvironmentDeploy').disabled = false; }
+}
+async function retryEnvironmentStep() {
+  const jobId = environmentState.job?.job_id || environmentState.plan?.plan_id;
+  const step = $('environmentRetryStep').value;
+  if (!jobId || !step) { environmentSetSummary('environmentPlanSummary', '请选择要重试的步骤。', 'warn'); return; }
+  try {
+    const r = await fetch('/api/environments/jobs/' + encodeURIComponent(jobId) + '/retry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({step})});
+    const d = await r.json(); if (!r.ok) throw new Error(`${d.error_code || 'E-VERIFY'}：${d.error || '重试失败'}`);
+    renderEnvironmentJob(d.job); pollEnvironmentJob(jobId);
+  } catch (e) { environmentSetSummary('environmentPlanSummary', e.message, 'error'); }
+}
+async function cancelEnvironmentJob() {
+  const jobId = environmentState.job?.job_id || environmentState.plan?.plan_id;
+  if (!jobId || !confirm('确定取消当前环境部署任务吗？')) return;
+  try {
+    const r = await fetch('/api/environments/jobs/' + encodeURIComponent(jobId) + '/cancel', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json(); if (!r.ok) throw new Error(`${d.error_code || 'E-VERIFY'}：${d.error || '取消失败'}`);
+    renderEnvironmentJob(d.job);
+  } catch (e) { environmentSetSummary('environmentPlanSummary', e.message, 'error'); }
 }
 
 async function loadConfigIntoForm() {
@@ -3198,21 +3539,65 @@ async function sendLlmChat() {
     input.focus();
   }
 }
+function renderDiagnosticImagePreview(result, runId, elapsedMs, requestedPrompt) {
+  result = result || {};
+  const filename = String(result.filename || result.path || '');
+  const localName = filename.replace(/\\/g, '/').split('/').pop();
+  const previewUrl = result.url || (localName
+    ? '/media/' + encodeURIComponent(localName) + '?diagnostic=' + encodeURIComponent(runId || Date.now())
+    : '');
+  if (!previewUrl) return false;
+
+  const provider = $('imgProvider').value;
+  const providerLabel = $('imgProvider').selectedOptions[0]?.textContent?.trim() || provider;
+  const model = provider === 'comfyui'
+    ? ($('imgComfyuiCheckpoint').value.trim() || 'SDXL 默认检查点')
+    : provider === 'cloud'
+      ? selectedImageModel()
+      : 'Boogu-Image';
+  const prompt = String(result.prompt || requestedPrompt || '').trim();
+  const displayName = localName || String(result.url || '').split('/').pop().split('?')[0] || '图片输出';
+  const lines = [
+    `提供商：${providerLabel}`,
+    `模型：${model || '未指定'}`,
+    elapsedMs != null ? `耗时：${(Number(elapsedMs) / 1000).toFixed(1)} 秒` : '',
+    `文件：${displayName}`,
+    prompt ? `需求：${prompt}` : '',
+  ].filter(Boolean);
+
+  $('diagImageLink').href = previewUrl;
+  $('diagImageOutput').src = previewUrl;
+  $('diagImageMeta').textContent = lines.join('\n');
+  $('diagImagePreview').style.display = 'grid';
+  return true;
+}
 async function runInlineDiagnostic(button) {
   const service = button.dataset.diagnostic;
   const action = button.dataset.diagnosticAction;
-  const target = service === 'comfyui_r2v' ? $('diagR2v') : service.startsWith('comfyui_') ? $('diagComfyuiVideo') : ($('diag' + service.replace(/^comfyui$/, 'Comfyui').replace(/^agnes$/, 'Agnes').replace(/^llm$/, 'Llm')) || button.nextElementSibling);
+  const target = $(button.dataset.diagnosticTarget) || button.closest('.diag-inline')?.querySelector('.hint');
+  const imagePrompt = service === 'image' && action === 'real' ? $('imgDiagnosticPrompt').value.trim() : '';
   if (service === 'llm' && action === 'real') {
     if (!confirm('真实对话可能产生费用，确定继续吗？')) return;
     openLlmChat();
     return;
   }
-  if (action === 'real' && !confirm('真实测试可能产生费用或占用 GPU，确定继续吗？')) return;
+  if (service === 'image' && action === 'real' && !imagePrompt) {
+    if (target) target.textContent = '请输入测试生成需求';
+    $('imgDiagnosticPrompt').focus();
+    return;
+  }
+  if (action === 'real') {
+    const message = service === 'image'
+      ? '将按当前提供商和输入需求真实生成一张图片，可能产生费用或占用 GPU，确定继续吗？'
+      : '真实测试可能产生费用或占用 GPU，确定继续吗？';
+    if (!confirm(message)) return;
+  }
   if (target) target.textContent = '测试中…';
   try {
     const cfg = await collectConfigFromForm();
     const url = action === 'quick' ? '/api/diagnostics/quick' : '/api/diagnostics/real';
-    const r = await fetch(url, {method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({service, config:cfg, confirm_cost:true, confirm_gpu:true})});
+    const parameters = imagePrompt ? {prompt: imagePrompt} : undefined;
+    const r = await fetch(url, {method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({service, config:cfg, parameters, confirm_cost:true, confirm_gpu:true})});
     const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { throw new Error(raw.slice(0, 300) || `HTTP ${r.status}`); }
     if (!r.ok) throw new Error(r.status === 404 ? '控制台后端未加载诊断接口，请重启控制台服务' : (d.error || d.message || `HTTP ${r.status}`));
     if (action === 'quick') {
@@ -3221,7 +3606,12 @@ async function runInlineDiagnostic(button) {
         : d.details?.check
           ? `（检查：${d.details.check}${d.details.endpoint ? ' · ' + d.details.endpoint : ''}）`
           : '';
-      if (target) target.textContent = `${d.status || ''}：${d.summary || '检查完成'}${detail}`;
+      const statusLabel = {
+        quick_passed: '检查通过',
+        needs_real_test: '需要真实测试',
+        failed: '检查失败',
+      }[d.status] || d.status || '检查完成';
+      if (target) target.textContent = `${statusLabel}：${d.summary || '检查完成'}${detail}`;
       return;
     }
     if (!d.run_id) throw new Error('服务未返回诊断任务 ID');
@@ -3240,6 +3630,7 @@ async function runInlineDiagnostic(button) {
         if (x.status === 'succeeded') {
           const output = x.result?.filename || x.result?.path || x.result?.url || x.result?.response || '服务可用';
           if (target) target.textContent = `测试成功：${output}`;
+          if (service === 'image') renderDiagnosticImagePreview(x.result, d.run_id, x.elapsed_ms, imagePrompt);
           return;
         }
         if (target) target.textContent = `测试失败：${x.failure?.summary || x.summary || '未知错误'}`;
@@ -3266,7 +3657,6 @@ $('asmEnd').addEventListener('change', loadAssembleVersions);
 $('btnExport').addEventListener('click', exportCsv);
 $('btnRefreshRecords').addEventListener('click', refreshRecords);
 $('btnClearHistory').addEventListener('click', clearHistory);
-$('btnCheck').addEventListener('click', checkConn);
 $('btnLmTest').addEventListener('click', checkLlm);
 $('btnSaveConfig').addEventListener('click', saveConfig);
 $('btnEditRules').addEventListener('click', openRuleModal);
@@ -3308,6 +3698,14 @@ $('imgProviderType').addEventListener('change', () => {
   else syncImageModelControls(type === 'agnes' ? 'agnes-image-2.5-flash' : type === 'dashscope' ? 'wanx-v1' : 'gpt-image-1', type);
   toggleCfgBoxes();
 });
+$('btnEnvironmentScan').addEventListener('click', scanEnvironment);
+$('environmentSshCommand').addEventListener('input', saveEnvironmentSshCommand);
+$('environmentSshCommand').addEventListener('change', persistEnvironmentSshCommand);
+$('btnEnvironmentRetrust').addEventListener('click', retrustEnvironment);
+$('btnEnvironmentPlan').addEventListener('click', loadEnvironmentPlan);
+$('btnEnvironmentDeploy').addEventListener('click', deployEnvironment);
+$('btnEnvironmentRetry').addEventListener('click', retryEnvironmentStep);
+$('btnEnvironmentCancel').addEventListener('click', cancelEnvironmentJob);
 $('btnGenAllAssets').addEventListener('click', genAllAssets);
 $('btnReverifyAssets').addEventListener('click', reverifyAssets);
 $('btnUploadVideo').addEventListener('click', () => $('videoUpload').click());
@@ -3332,9 +3730,10 @@ loadImages();
 loadProject();
 renderProjects();
 loadAssembleHistory();
-checkConn();
 checkLlm();
 loadConfigIntoForm();
+loadSavedEnvironmentSshCommand();
+loadEnvironmentRecipes();
 resumeExpand();
 goStep(1);
 </script>

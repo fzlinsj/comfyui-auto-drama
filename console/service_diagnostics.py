@@ -178,9 +178,11 @@ class _HttpAdapter:
         return result
 
     def generate(self, **kwargs):
+        parameters = kwargs.get("parameters") if isinstance(kwargs.get("parameters"), dict) else {}
+        prompt = str(parameters.get("prompt") or "").strip() or "A diagnostic test card, clean lighting, no text, neutral composition"
         payload = {
             "model": self.model,
-            "prompt": "A diagnostic test card, clean lighting, no text, neutral composition",
+            "prompt": prompt,
             "size": "768x768",
             "ratio": "1:1",
             "extra_body": {"response_format": "url"},
@@ -190,7 +192,7 @@ class _HttpAdapter:
         url = item.get("url") or item.get("image_url")
         if not url:
             raise RuntimeError("图片服务未返回可用 URL")
-        return {"url": url, "filename": os.path.basename(urllib.parse.urlparse(url).path) or "diagnostic.png", "validated": True}
+        return {"url": url, "filename": os.path.basename(urllib.parse.urlparse(url).path) or "diagnostic.png", "prompt": prompt, "validated": True}
 
     def inspect(self, **kwargs):
         return {"ok": True, "service": "vision", "card_sha256": hashlib.sha256(_png_card()).hexdigest()}
@@ -213,8 +215,10 @@ class _ComfyDiagnosticAdapter:
     def __init__(self, client, output_dir):
         self.client, self.output_dir = client, output_dir
 
-    def _graph(self, service):
-        task = {"prompt": "A neutral diagnostic test", "duration": 5, "seed": 12345,
+    def _graph(self, service, parameters=None):
+        parameters = parameters if isinstance(parameters, dict) else {}
+        prompt = str(parameters.get("prompt") or "").strip() or "A neutral diagnostic test"
+        task = {"prompt": prompt, "duration": 5, "seed": 12345,
                 "steps": 4, "mp": 0.2, "prefix": "diagnostics/comfyui"}
         if service == "comfyui_image":
             return build_sdxl_graph({"prompt": task["prompt"], "width": 768, "height": 768,
@@ -248,7 +252,7 @@ class _ComfyDiagnosticAdapter:
     def real_test(self, service, parameters):
         if service == "image":
             service = "comfyui_image"
-        graph = self._graph(service)
+        graph = self._graph(service, parameters)
         preflight = self.client.preflight(graph)
         if not preflight.get("ok"):
             raise RuntimeError("ComfyUI 预检失败：" + json.dumps(preflight, ensure_ascii=False))
@@ -272,7 +276,8 @@ class _ComfyDiagnosticAdapter:
                     self.client.download_output(output, destination)
                     if not os.path.isfile(destination) or os.path.getsize(destination) == 0:
                         raise RuntimeError("ComfyUI 输出下载后为空")
-                    return {"prompt_id": prompt_id, "filename": destination, "validated": True, "preflight": preflight}
+                    prompt = str((parameters or {}).get("prompt") or "").strip() or "A neutral diagnostic test"
+                    return {"prompt_id": prompt_id, "filename": destination, "prompt": prompt, "validated": True, "preflight": preflight}
             time.sleep(1)
         raise RuntimeError("ComfyUI 诊断任务超时: " + str(prompt_id))
 
@@ -413,20 +418,25 @@ class ServiceDiagnostics:
         if service in GPU_SERVICES and not confirm_gpu:
             raise ValueError("confirm_gpu must be true for " + service)
 
-    def start_real_test(self, service, confirm_cost=False, confirm_gpu=False):
+    def start_real_test(self, service, confirm_cost=False, confirm_gpu=False, parameters=None):
         service = str(service or "").strip()
         if service not in SERVICES:
             raise ValueError("unknown diagnostic service: " + service)
         if service == "comfyui":
             raise ValueError("comfyui metadata has no paid real test; choose a generation mode")
         self._confirm(service, bool(confirm_cost), bool(confirm_gpu))
-        parameters = self._parameters(service)
-        run_id = self.store.create_diagnostic_run(service, "real", parameters)
+        run_parameters = self._parameters(service)
+        supplied = parameters if isinstance(parameters, dict) else {}
+        if service in {"agnes", "boogu", "image", "comfyui_image"}:
+            prompt = str(supplied.get("prompt") or "").strip()
+            if prompt:
+                run_parameters["prompt"] = prompt[:4000]
+        run_id = self.store.create_diagnostic_run(service, "real", run_parameters)
         with self._lock:
-            self._results[service] = self._entry(service, "real", "running", time.monotonic(), "真实测试运行中", {"run_id": run_id, "parameters": parameters})
-        thread = threading.Thread(target=self._run_real, args=(run_id, service, parameters), daemon=True)
+            self._results[service] = self._entry(service, "real", "running", time.monotonic(), "真实测试运行中", {"run_id": run_id, "parameters": run_parameters})
+        thread = threading.Thread(target=self._run_real, args=(run_id, service, run_parameters), daemon=True)
         thread.start()
-        return {"run_id": run_id, "service": service, "level": "real", "status": "running", "parameters": parameters}
+        return {"run_id": run_id, "service": service, "level": "real", "status": "running", "parameters": run_parameters}
 
     def _parameters(self, service):
         if service in {"agnes", "boogu", "image"}:
@@ -436,7 +446,7 @@ class ServiceDiagnostics:
         if service == "vision":
             return {"width": 256, "height": 128, "card": "deterministic"}
         if service == "comfyui_image":
-            return {"width": 768, "height": 768, "steps": 12}
+            return {"prompt": "A diagnostic test card, clean lighting, no text", "width": 768, "height": 768, "steps": 12}
         return {"mp": 0.2, "duration": 5, "steps": 4, "mode": service.rsplit("_", 1)[-1]}
 
     def _run_real(self, run_id, service, parameters):

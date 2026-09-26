@@ -1,0 +1,156 @@
+{
+  "id": "minimax-h3-sdxl",
+  "version": "1.0.0",
+  "platforms": ["autodl", "chenyu"],
+  "requirements": {
+    "min_comfyui": "0.31.0",
+    "min_python": ">=3.10",
+    "min_vram_bytes": 25769803776,
+    "min_disk_bytes": 85899345920,
+    "recommended_data_path": "/root/autodl-tmp"
+  },
+  "workflows": [
+    "workflows/minimax_h3_t2v_turbo.json",
+    "workflows/video_minimax_h3_i2v_uncensored_enhancer.json",
+    "workflows/video_minimax_h3_r2v.json",
+    "workflows/sdxl_image_api_template.json"
+  ],
+  "models": [
+    {
+      "filename": "sd_xl_base_1.0.safetensors",
+      "target_dir": "models/checkpoints",
+      "size_bytes": 6938078334,
+      "sha256": "31e35c80fc4829d14f90153f4c74cd59c90b779f6afe05a74cd6120b893f7e5b",
+      "primary_url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
+      "filename": "minimax_h3_video_vae_fp16.safetensors",
+      "target_dir": "models/vae",
+      "size_bytes": 5207808496,
+      "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+      "primary_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
+      "filename": "minimax_h3_audio_vae_fp32.safetensors",
+      "target_dir": "models/vae",
+      "size_bytes": 605254808,
+      "sha256": "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+      "primary_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
+      "filename": "minimax_h3_fl2va_int8_convrot.safetensors",
+      "target_dir": "models/diffusion_models",
+      "size_bytes": 34038892334,
+      "sha256": "7ad4c73e6e378b822ffd1629f27f632d3787d95f5e468e3af958f98c58df96a5",
+      "primary_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_int8_convrot.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_int8_convrot.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
+      "filename": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "target_dir": "models/diffusion_models",
+      "size_bytes": 20970379616,
+      "sha256": "e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a",
+      "primary_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
+      "filename": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "target_dir": "models/diffusion_models",
+      "size_bytes": 20970379616,
+      "sha256": "9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779",
+      "primary_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
+      "filename": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "target_dir": "models/text_encoders",
+      "size_bytes": 15687142551,
+      "sha256": "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+      "primary_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
+      "filename": "qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors",
+      "target_dir": "models/text_encoders",
+      "size_bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "primary_url": "",
+      "fallback_urls": [],
+      "shareable": false,
+      "managed": false
+    },
+    {
+      "filename": "qwen3vl_32b_h3_generation_tail_50_63_int8_convrot.safetensors",
+      "target_dir": "models/text_encoders",
+      "size_bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "primary_url": "",
+      "fallback_urls": [],
+      "shareable": false,
+      "managed": false
+    },
+    {
+      "filename": "minimax_h3_turbo_v4_step600_ema.safetensors",
+      "target_dir": "models/loras",
+      "size_bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "primary_url": "",
+      "fallback_urls": [],
+      "shareable": false,
+      "managed": false
+    },
+    {
+      "filename": "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
+      "target_dir": "models/loras",
+      "size_bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "primary_url": "",
+      "fallback_urls": [],
+      "shareable": false,
+      "managed": false
+    }
+  ],
+  "nodes": [
+    {
+      "filename": "ComfyUI-Manager",
+      "target_dir": "custom_nodes",
+      "size_bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "primary_url": "https://github.com/ltdrdata/ComfyUI-Manager.git",
+      "fallback_urls": [],
+      "shareable": true
+    },
+    {
+      "filename": "ComfyUI-WanVideoWrapper",
+      "target_dir": "custom_nodes",
+      "size_bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "primary_url": "https://github.com/kijai/ComfyUI-WanVideoWrapper.git",
+      "fallback_urls": [],
+      "shareable": true
+    }
+  ],
+  "checks": [
+    {"service": "sdxl", "resource_mode": "gpu_required", "workflow": "workflows/sdxl_image_api_template.json", "output_kind": "image"},
+    {"service": "t2v", "resource_mode": "gpu_required", "workflow": "workflows/minimax_h3_t2v_turbo.json", "output_kind": "video"},
+    {"service": "i2v", "resource_mode": "gpu_required", "workflow": "workflows/video_minimax_h3_i2v_uncensored_enhancer.json", "output_kind": "video"},
+    {"service": "r2v", "resource_mode": "gpu_required", "workflow": "workflows/video_minimax_h3_r2v.json", "output_kind": "video"}
+  ]
+}
