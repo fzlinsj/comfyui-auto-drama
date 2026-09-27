@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 CONSOLE_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = CONSOLE_DIR.parent
@@ -72,6 +73,34 @@ class EnvironmentApiTests(unittest.TestCase):
         with self.assertRaises(EnvironmentError) as ctx:
             self.manager.start_deploy("p1", recipe_version="1.0.0", confirm=False)
         self.assertEqual(ctx.exception.code, "E-CONFIRMATION-REQUIRED")
+
+    def test_start_deploy_passes_configured_verifier_to_deployer(self):
+        verifier = object()
+        manager = EnvironmentManager(
+            self.store,
+            downloader_factory=lambda: object(),
+            verifier=verifier,
+        )
+        manager._plans["p1"] = {
+            "plan": {
+                "plan_id": "p1",
+                "target_id": "target-1",
+                "recipe_version": "1.0.0",
+                "status": "plan_ready",
+                "download_tasks": [],
+            },
+            "recipe": {},
+            "scan": {"has_gpu": True},
+        }
+        manager._sessions["target-1"] = object()
+
+        with patch("environment_manager.EnvironmentDeployer") as deployer_class, patch(
+            "environment_manager.threading.Thread"
+        ) as thread_class:
+            manager.start_deploy("p1", recipe_version="1.0.0", confirm=True)
+
+        self.assertIs(deployer_class.call_args.kwargs["verifier"], verifier)
+        thread_class.return_value.start.assert_called_once_with()
 
     def test_job_payload_is_redacted(self):
         payload = self.manager.redact_payload({"message": "password=secret", "credential_ref": "ref"})

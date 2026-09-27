@@ -145,6 +145,16 @@
       "primary_url": "https://github.com/kijai/ComfyUI-WanVideoWrapper.git",
       "fallback_urls": [],
       "shareable": true
+    },
+    {
+      "filename": "ComfyUI_IPAdapter_plus",
+      "target_dir": "custom_nodes",
+      "size_bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "primary_url": "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git",
+      "fallback_urls": [],
+      "shareable": true,
+      "managed": true
     }
   ],
   "checks": [

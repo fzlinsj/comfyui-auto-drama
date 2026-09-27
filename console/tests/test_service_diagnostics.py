@@ -180,7 +180,21 @@ class ServiceDiagnosticsTests(unittest.TestCase):
     def test_comfyui_image_real_test_submits_and_downloads_a_validated_workflow(self):
         diagnostics = ServiceDiagnostics(
             store=self.store,
-            config={"comfyui": {"server": "http://comfy"}},
+            config={
+                "comfyui": {"server": "http://comfy"},
+                "image_gen": {
+                    "provider": "comfyui",
+                    "comfyui": {
+                        "checkpoint": "cinematic-xl.safetensors",
+                        "width": 896,
+                        "height": 1152,
+                        "steps": 28,
+                        "cfg": 6.5,
+                        "sampler": "euler_ancestral",
+                        "scheduler": "normal",
+                    },
+                },
+            },
             adapters={"comfyui": self.comfy},
             output_dir=self.temp_dir.name,
         )
@@ -202,6 +216,15 @@ class ServiceDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("diagnostic_service", graph)
         encoded_text = [node["inputs"].get("text") for node in graph.values() if node["class_type"] == "CLIPTextEncode"]
         self.assertIn("电影感雪山日出，金色云海", encoded_text)
+        checkpoint = next(node for node in graph.values() if node["class_type"] == "CheckpointLoaderSimple")
+        latent = next(node for node in graph.values() if node["class_type"] == "EmptyLatentImage")
+        sampler = next(node for node in graph.values() if node["class_type"] == "KSampler")
+        self.assertEqual(checkpoint["inputs"]["ckpt_name"], "cinematic-xl.safetensors")
+        self.assertEqual((latent["inputs"]["width"], latent["inputs"]["height"]), (896, 1152))
+        self.assertEqual(sampler["inputs"]["steps"], 28)
+        self.assertEqual(sampler["inputs"]["cfg"], 6.5)
+        self.assertEqual(sampler["inputs"]["sampler_name"], "euler_ancestral")
+        self.assertEqual(sampler["inputs"]["scheduler"], "normal")
         self.assertEqual(self.comfy.history_calls, ["diagnostic-prompt"])
         self.assertTrue(Path(result["result"]["filename"]).is_file())
 

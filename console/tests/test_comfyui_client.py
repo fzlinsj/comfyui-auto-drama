@@ -56,6 +56,41 @@ class ComfyUIClientTests(unittest.TestCase):
         ComfyUIClient("http://comfy", transport=transport).delete_pending("prompt-1")
         self.assertEqual(transport.posts, [("/queue", {"delete": ["prompt-1"]})])
 
+    def test_checkpoint_models_extracts_nested_checkpoint_choices(self):
+        transport = FakeTransport({
+            "/object_info": {
+                "CheckpointLoaderSimple": {
+                    "input": {
+                        "required": {
+                            "ckpt_name": [[
+                                "zeta.safetensors",
+                                "alpha.safetensors",
+                                "alpha.safetensors",
+                            ], {"tooltip": "checkpoint"}]
+                        }
+                    }
+                }
+            }
+        })
+        models = ComfyUIClient("http://comfy", transport=transport).checkpoint_models()
+        self.assertEqual(models, ["alpha.safetensors", "zeta.safetensors"])
+
+    def test_checkpoint_models_returns_empty_when_checkpoint_node_is_missing(self):
+        transport = FakeTransport({"/object_info": {"CLIPTextEncode": {}}})
+        models = ComfyUIClient("http://comfy", transport=transport).checkpoint_models()
+        self.assertEqual(models, [])
+
+    def test_checkpoint_models_accepts_flat_choice_list(self):
+        transport = FakeTransport({
+            "/object_info": {
+                "CheckpointLoaderSimple": {
+                    "input": {"required": {"ckpt_name": ["flat-a.safetensors", "flat-b.safetensors"]}}
+                }
+            }
+        })
+        models = ComfyUIClient("http://comfy", transport=transport).checkpoint_models()
+        self.assertEqual(models, ["flat-a.safetensors", "flat-b.safetensors"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -144,6 +144,14 @@ class SettingsDiagnosticsUiTests(unittest.TestCase):
         self.assertNotIn('<option value="comfyui">ComfyUI 工作流</option>', image_format)
         self.assertIn("if (type === 'comfyui') $('imgProvider').value = 'comfyui'", self.source)
 
+    def test_comfyui_checkpoint_uses_refreshable_model_selector(self):
+        self.assertIn('id="imgComfyuiCheckpointSelect"', self.source)
+        self.assertIn('id="btnRefreshComfyuiCheckpoints"', self.source)
+        self.assertIn("/api/comfyui/checkpoints?server=", self.source)
+        self.assertIn("function loadComfyuiCheckpointModels", self.source)
+        self.assertIn("selectedComfyuiCheckpoint()", self.source)
+        self.assertIn("checkpoint:selectedComfyuiCheckpoint()", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

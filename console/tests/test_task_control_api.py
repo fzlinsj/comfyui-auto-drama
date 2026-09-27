@@ -1,6 +1,8 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 CONSOLE_DIR = Path(__file__).resolve().parents[1]
@@ -50,6 +52,29 @@ class TaskControlApiTests(unittest.TestCase):
         self.assertIn('"image/png"', outputs_route)
         self.assertIn('"image/jpeg"', outputs_route)
         self.assertIn('"image/webp"', outputs_route)
+
+    def test_media_resolver_falls_back_to_legacy_console_output_directory(self):
+        resolver = getattr(batch_console, "find_media_path", None)
+        self.assertTrue(callable(resolver), "media resolver is missing")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            current = root / "current"
+            legacy = root / "legacy"
+            current.mkdir()
+            legacy.mkdir()
+            expected = legacy / "diagnostic-old.png"
+            expected.write_bytes(b"png")
+            with patch.object(batch_console, "IMAGE_DIRS", []), patch.object(
+                batch_console, "OUTPUTS_DIR", str(current)
+            ), patch.object(batch_console, "LEGACY_OUTPUTS_DIR", str(legacy)):
+                self.assertEqual(Path(resolver(expected.name)), expected)
+
+    def test_media_route_uses_shared_media_resolver(self):
+        source = Path(batch_console.__file__).read_text(encoding="utf-8")
+        media_route = source.split('if path.path.startswith("/media/"):', 1)[1].split(
+            'if path.path == "/api/records":', 1
+        )[0]
+        self.assertIn("find_media_path(fn)", media_route)
 
 
 if __name__ == "__main__":

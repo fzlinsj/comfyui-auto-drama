@@ -99,6 +99,7 @@ _RECIPE_TEMPLATES = {
     "model_probe": "",
     "download_file": "",
     "clone_node": "",
+    "prepare_dirs": "",
 }
 
 _COMPATIBLE_KEX_ALGORITHMS = "curve25519-sha256,ecdh-sha2-nistp256,diffie-hellman-group14-sha256"
@@ -243,6 +244,15 @@ def build_recipe_command(recipe_name, params):
             "-printf 'node\\t%f\\t%y\\t%p\\n'; "
             "done; true"
         )
+    elif recipe_name == "prepare_dirs":
+        if set(params) != {"paths"} or not isinstance(params.get("paths"), list):
+            raise ValueError("paths is the only accepted parameter and must be a list")
+        paths = [str(path or "") for path in params["paths"]]
+        if not paths:
+            rendered = ":"
+        else:
+            quoted = " ".join(_safe_remote_path(path) for path in paths)
+            rendered = f"set -eu; mkdir -p -- {quoted}"
     elif "{path}" in template:
         if set(params) != {"path"}:
             raise ValueError("path is the only accepted parameter")

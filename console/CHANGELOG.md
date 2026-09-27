@@ -5,6 +5,167 @@
 
 ---
 
+## 2026-09-27 - v0.13.72 - 自动启动缺失资源部署
+### 本次更新内容
+
+- 环境计划检测到缺失资源且状态为 `plan_ready` 时，前端自动提交部署任务，不再只显示“需要下载”。
+
+### 验证方式
+
+- Python 3.13 全量 unittest
+
+### 影响与注意事项
+
+- 自动部署仍需用户已完成 SSH 指纹确认，并会经过现有部署确认接口。
+- 节点安装完成后必须重启 ComfyUI。
+
+---
+
+## 2026-09-27 - v0.13.71 - 参考图环境自动补齐节点
+### 本次更新内容
+
+- 环境配方加入 `ComfyUI_IPAdapter_plus`，扫描计划可识别并自动克隆缺失节点。
+- 部署器现在实际执行远程目录准备和节点安装，不再把 `prepare_dirs`、`install_nodes` 当作空步骤。
+- 计划运行数据携带扫描路径，支持使用实际 ComfyUI/模型目录。
+
+### 验证方式
+
+- Python 3.13 `console.tests.test_environment_recipes`、`test_environment_deployer`、`test_environment_scanner`
+
+### 影响与注意事项
+
+- IPAdapter 权重文件仍需配方提供经过核实的下载地址和 SHA256；在校验信息未确认前不会静默下载未知文件。
+- 节点克隆完成后必须重启 ComfyUI，控制台服务也需重启以加载后端改动。
+
+---
+
+## 2026-09-27 - v0.13.70 - 明确提示 ComfyUI IPAdapter 节点缺失
+### 本次更新内容
+
+- ComfyUI 参考图生成检测不到 IPAdapter Plus 时，错误信息现在会列出已检测到的相关节点，便于判断是隧道未连通、节点未加载还是节点名称不兼容。
+
+### 验证方式
+
+- Python 3.13 `console.tests.test_identity_reference` 定向测试
+- Python 3.13 全量 unittest
+- Python 3.13 `py_compile`
+
+### 影响与注意事项
+
+- 参考图身份一致性仍要求 ComfyUI 实际加载 IPAdapter Plus，不会静默退回普通文生图。
+- 修改控制台后需要重启控制台服务；ComfyUI 端节点安装后也需要重启 ComfyUI。
+
+---
+
+## 2026-09-27 - v0.13.69 - ComfyUI 检查点模型改为可选列表
+
+### 本次更新内容
+
+- 设置页的 ComfyUI SDXL 检查点模型现在会从当前 ComfyUI `/object_info` 自动读取并提供下拉选择。
+- 新增刷新模型列表按钮；模型列表或 SSH 隧道不可用时保留手动输入，并不会覆盖已保存的模型名。
+- 保存配置、诊断预览和实际生图统一使用选中的 checkpoint 文件名。
+
+### 验证方式
+
+- Python 3.13 定向 unittest：ComfyUI 客户端模型解析、设置页契约测试
+- Python 3.13 全量 unittest
+- Python 3.13 `py_compile`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 使用下拉列表前请启动 ComfyUI，并确保 SSH 隧道 `127.0.0.1:6006` 已开启。
+- ComfyUI 未连接时仍可点击“手动输入”填写实际 checkpoint 文件名。
+
+## 2026-09-27 - v0.13.68 - 参考图身份一致性与批量资产重生成
+### 本次更新内容
+
+- 角色四视图和批量参考资产生成现在会强制重新生成已有图片，失败后可再次点击继续，不再因旧图存在而跳过。
+- 非正面角色视图自动使用同一角色正面图作为身份锚点；后端支持将参考图上传到 ComfyUI 并通过 IPAdapter 接入 SDXL 工作流。
+- 缺少 IPAdapter/LoadImage 节点或参考图上传失败时明确报错，禁止静默退回独立文生图；云端适配器同步传递参考图编辑请求。
+### 验证方式
+
+- Python 3.13 `python -m unittest discover -s console/tests -p "test_*.py"`（181 项）
+- Python 3.13 `python -m py_compile workflows/build_sdxl_graph.py console/batch_console.py`
+- `git diff --check`
+### 影响与注意事项
+
+- 修改控制台后需重启控制台服务；ComfyUI 参考图真实生成需要先开启 `127.0.0.1:6006` SSH 隧道/服务，并在 `config.json` 配置实际 checkpoint。
+- ComfyUI 端必须安装并启用 IPAdapter Plus 节点；未安装时会直接提示安装，不会生成无法保持身份的图片。
+
+## 2026-09-27 - v0.13.67 - 强化真人漫剧与真实动物生图策略
+### 本次更新内容
+
+- 前端新增真人男性、真人女性、真实动物和未确定角色类型，真人角色统一使用真实演员/电影摄影语义，动物角色保持真实物种、自然解剖和非拟人化表达。
+- 分镜和资产提示词按角色类型生成，后端同步传递 `role_type`，旧项目的 `roleGender` 字段继续兼容。
+- ComfyUI 生图校验不再静默回退到固定 checkpoint；未配置模型时明确提示检查 `image_gen.comfyui.checkpoint`，并合并现实摄影负面词。
+- 动物资产质检改用物种、自然解剖和反拟人化检查，不再套用人类性别规则；Windows 启动脚本固定调用 Python 3.13。
+### 验证方式
+
+- Python 3.13 定向 unittest：真人漫剧提示词、图片生成策略和 SDXL 工作流测试
+- Python 3.13 全量 unittest、`py_compile` 和 `git diff --check`
+### 影响与注意事项
+
+- 修改控制台代码或前端后需重启控制台服务；已有项目仍可使用旧 `roleGender` 数据。
+- ComfyUI 在线连通性和真实生图需在 SSH 隧道 `127.0.0.1:6006` 开启后再验证；当前不会自动要求或启动 ComfyUI。
+
+## 2026-09-27 - v0.13.66 - 修复 ComfyUI 生图提示词参数未生效
+### 本次更新内容
+
+- ComfyUI 诊断生图现在使用当前配置中的 checkpoint、尺寸、步数、CFG、采样器和 scheduler，不再固定使用默认 SDXL 模型或 4 步采样。
+- 正式 ComfyUI 生图同步使用所选 checkpoint 和质量参数，输入提示词原样写入正向 CLIP 节点，避免界面显示的配置与实际工作流不一致。
+- 新增诊断与正式生图回归测试，覆盖中文提示词、模型选择和采样质量参数。
+
+### 验证方式
+
+- Python 3.13 unittest 定向回归测试（诊断工作流与正式生图工作流）
+- Python 3.13 unittest 全量测试
+- Python 3.13 py_compile
+- git diff --check
+
+### 影响与注意事项
+
+- 需要重启控制台服务后加载新的生图参数传播逻辑；已有图片和任务数据不受影响。
+- 中文提示词不会被后端擅自翻译或删改；若使用 SDXL Base，中文理解能力仍取决于所选 checkpoint，建议使用支持中文的模型或在输入中补充英文关键词。
+
+## 2026-09-27 - v0.13.65 - 恢复历史诊断图片预览
+### 本次更新内容
+
+- `/media/` 路由现在统一通过媒体解析器查找素材、新输出目录以及旧版 `console/comfyui_backup/outputs` 目录。
+- 修复旧控制台已经成功生成诊断图片，但页面预览仍然 404、显示破图的问题；历史诊断图片无需重新生成。
+- 新增回归测试，锁定媒体路由必须调用统一解析器并支持旧输出目录回退。
+
+### 验证方式
+
+- `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe -m unittest console.tests.test_task_control_api -v`
+- `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe -m unittest discover -s console/tests -p "test_*.py"`
+- 启动控制台后请求 `/media/diagnostic_c6d0577c-0f20-4d34-9380-4c83575840d5.png`，确认返回 `200 image/png`。
+
+### 影响与注意事项
+
+- 兼容目录仅用于读取旧版生成结果；新诊断任务仍写入项目根配置的正式输出目录。
+- 需要重启控制台加载新媒体路由，浏览器刷新后即可显示已有图片。
+
+## 2026-09-27 - v0.13.64 - 修复诊断图片路径与环境验证误报
+### 本次更新内容
+
+- ComfyUI 诊断图片现在明确写入项目根目录解析后的输出目录，与 `/media/` 路由保持一致，避免生成成功后预览返回 404。
+- 环境部署的 SDXL、T2V、I2V、R2V 验证步骤现在会构建正式工作流并调用已配置 ComfyUI 的真实 `preflight`，不再因为缺少 `plan.verification` 而四项默认失败。
+- 验证器会从 ComfyUI `/object_info` 返回的模型列表中选择已加载的 MiniMax H3 / Qwen 兼容变体，并保留 Ref2VA 缺失时回退 FL2VA 的既有兼容策略。
+- 本机 ComfyUI 地址同步为当前 SSH 隧道 `http://127.0.0.1:6006`。
+
+### 验证方式
+
+- `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe -m unittest console.tests.test_batch_console_factories console.tests.test_environment_verifier console.tests.test_environment_api console.tests.test_environment_deployer console.tests.test_service_diagnostics console.tests.test_autodl_model_compat -v`
+- `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe -m unittest discover -s console/tests -p "test_*.py"`
+- `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe -m py_compile console/batch_console.py console/environment_manager.py console/environment_verifier.py`
+- `git diff --check`
+
+### 影响与注意事项
+
+- 需要重启控制台后新工厂配置才会生效；`scripts/start_windows.bat` 已固定调用 Python 3.13。
+- 当前验证依赖本机 SSH 隧道正在监听 `127.0.0.1:6006`；隧道未启动时会记录真实连接错误，而不是误报模型缺失。
+
 ## 2026-09-26 - v0.13.63 - 修复 Git 镜像失败后的目录阻塞
 ### 本次更新内容
 

@@ -171,8 +171,39 @@ class EnvironmentDeployer:
         return self._last_job
 
     def _execute_cpu_step(self, step, plan, cancel):
+        if step == "prepare_dirs":
+            if self.session is None:
+                return
+            scan = plan.get("scan") or {}
+            comfy_path = str((plan.get("comfyui") or scan.get("comfyui") or {}).get("path") or "/root/ComfyUI").rstrip("/")
+            data_path = str((plan.get("disk") or scan.get("disk") or {}).get("path") or "/root/autodl-tmp").rstrip("/")
+            paths = [f"{comfy_path}/custom_nodes", f"{data_path}/models"]
+            for resource in plan.get("download_tasks") or []:
+                kind = str(resource.get("resource_kind") or "model")
+                target_dir = str(resource.get("target_dir") or "").strip("/\\")
+                if not target_dir:
+                    continue
+                root = comfy_path if kind == "node" else data_path
+                paths.append(f"{root}/{target_dir}")
+            self.session.run_recipe("prepare_dirs", {"paths": sorted(set(paths))}, timeout=120)
+            return
+        if step == "install_nodes":
+            if self.session is None:
+                return
+            scan = plan.get("scan") or {}
+            comfy_path = str((plan.get("comfyui") or scan.get("comfyui") or {}).get("path") or "/root/ComfyUI").rstrip("/")
+            for resource in plan.get("download_tasks") or []:
+                if str(resource.get("resource_kind") or "") != "node":
+                    continue
+                target_dir = str(resource.get("target_dir") or "custom_nodes").strip("/\\")
+                filename = str(resource.get("filename") or "")
+                target = f"{comfy_path}/{target_dir}/{filename}"
+                self.session.run_recipe("clone_node", {"url": resource.get("primary_url"), "target": target}, timeout=3600)
+            return
         if step == "download_models":
             for resource in plan.get("download_tasks") or []:
+                if str(resource.get("resource_kind") or "model") == "node":
+                    continue
                 filename = str(resource.get("filename") or "")
                 if filename in self._verified_downloads:
                     continue

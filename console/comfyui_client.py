@@ -97,6 +97,16 @@ class ComfyUIClient:
     def object_info(self):
         return self.transport.get_json("/object_info") or {}
 
+    def checkpoint_models(self):
+        objects = self.object_info()
+        required = (((objects.get("CheckpointLoaderSimple") or {}).get("input") or {}).get("required") or {})
+        choices = required.get("ckpt_name") or []
+        if isinstance(choices, (list, tuple)) and choices and isinstance(choices[0], (list, tuple)):
+            choices = choices[0]
+        if not isinstance(choices, (list, tuple)):
+            return []
+        return sorted({str(name).strip() for name in choices if str(name).strip()}, key=str.casefold)
+
     def preflight(self, graph):
         available = self.object_info()
         missing_nodes = set()

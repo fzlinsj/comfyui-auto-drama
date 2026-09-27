@@ -157,6 +157,14 @@ def _validate_resource(resource, kind):
     if not isinstance(managed, bool):
         raise ValueError(f"{kind}.managed must be boolean")
     if managed:
+        # Git repositories are cloned and do not have a file checksum.
+        if kind == "node" and str(resource.get("primary_url") or "").lower().endswith(".git"):
+            if str(resource["sha256"]) not in {"", "0" * 64}:
+                raise ValueError(f"{kind} git resource must use an empty or zero checksum")
+            _check_url(resource["primary_url"], f"{kind}.primary_url")
+            for index, url in enumerate(resource["fallback_urls"]):
+                _check_url(url, f"{kind}.fallback_urls[{index}]")
+            return
         if not _SHA256.fullmatch(str(resource["sha256"])):
             raise ValueError(f"{kind}.sha256 must be a SHA256 hex digest")
         _check_url(resource["primary_url"], f"{kind}.primary_url")

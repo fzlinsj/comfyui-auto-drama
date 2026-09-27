@@ -11,7 +11,8 @@ class WindowsLauncherTests(unittest.TestCase):
         self.assertIn("Get-NetTCPConnection", source)
         self.assertIn(":8890", source)
         self.assertIn("Stop-Process -Id", source)
-        self.assertIn("python batch_console.py 8890", source)
+        self.assertIn(r"%LocalAppData%\Programs\Python\Python313\python.exe", source)
+        self.assertIn("batch_console.py 8890", source)
 
 
 if __name__ == "__main__":

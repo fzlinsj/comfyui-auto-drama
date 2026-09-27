@@ -771,7 +771,15 @@
       </div>
       <div id="imgComfyuiBox" class="provider-box">
         <label class="field">SDXL 检查点模型
-          <input type="text" id="imgComfyuiCheckpoint" placeholder="sd_xl_base_1.0.safetensors">
+          <select id="imgComfyuiCheckpointSelect">
+            <option value="">璇峰厛鍒锋柊 ComfyUI 妯″瀷鍒楄〃</option>
+          </select>
+          <input type="text" id="imgComfyuiCheckpoint" placeholder="ComfyUI 未连接时手动输入模型文件名" style="display:none">
+          <div class="row" style="margin:6px 0 0;gap:8px">
+            <button class="btn" type="button" id="btnRefreshComfyuiCheckpoints">刷新模型列表</button>
+            <button class="btn ghost" type="button" id="btnManualComfyuiCheckpoint">手动输入</button>
+          </div>
+          <span id="imgComfyuiCheckpointHint" class="hint">列表来自当前 ComfyUI 地址；请先开启 SSH 隧道。</span>
         </label>
         <div class="hint">使用上方 ComfyUI 服务器地址，通过 SDXL 工作流生成图片。</div>
       </div>
@@ -2256,6 +2264,67 @@ function syncImageModelControls(model, providerType) {
 function selectedImageModel() {
   return $('imgCloudModelSelect').value === '__custom__' ? $('imgCloudModel').value.trim() : $('imgCloudModelSelect').value;
 }
+function selectedComfyuiCheckpoint() {
+  const manual = $('imgComfyuiCheckpoint');
+  return manual.style.display !== 'none' ? manual.value.trim() : $('imgComfyuiCheckpointSelect').value.trim();
+}
+function setComfyuiCheckpointValue(value) {
+  const select = $('imgComfyuiCheckpointSelect');
+  const manual = $('imgComfyuiCheckpoint');
+  const checkpoint = String(value || '').trim();
+  const known = Array.from(select.options).some(option => option.value === checkpoint);
+  if (known) {
+    select.value = checkpoint;
+    manual.style.display = 'none';
+  } else if (checkpoint) {
+    const option = document.createElement('option');
+    option.value = checkpoint;
+    option.textContent = `${checkpoint}（当前列表中未找到）`;
+    option.dataset.saved = 'true';
+    select.appendChild(option);
+    select.value = checkpoint;
+    manual.style.display = 'none';
+  } else {
+    select.value = '';
+    manual.value = '';
+    manual.style.display = 'none';
+  }
+}
+async function loadComfyuiCheckpointModels() {
+  const select = $('imgComfyuiCheckpointSelect');
+  const hint = $('imgComfyuiCheckpointHint');
+  const button = $('btnRefreshComfyuiCheckpoints');
+  const saved = selectedComfyuiCheckpoint();
+  const server = $('serverInput').value.trim();
+  if (!server) { hint.textContent = '请先填写 ComfyUI 地址。'; return; }
+  button.disabled = true;
+  hint.textContent = '正在读取 ComfyUI 模型列表…';
+  try {
+    const response = await fetch('/api/comfyui/checkpoints?server=' + encodeURIComponent(server));
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    const models = Array.isArray(data.models) ? data.models : [];
+    const selected = saved || select.value;
+    select.innerHTML = '<option value="">请选择检查点模型</option>' + models
+      .map(model => `<option value="${esc(model)}">${esc(model)}</option>`).join('');
+    if (selected && !models.includes(selected)) {
+      const option = document.createElement('option');
+      option.value = selected;
+      option.textContent = `${selected}（当前列表中未找到）`;
+      option.dataset.saved = 'true';
+      select.appendChild(option);
+    }
+    select.value = selected || '';
+    $('imgComfyuiCheckpoint').style.display = 'none';
+    hint.textContent = models.length
+      ? `已读取 ${models.length} 个检查点模型。`
+      : 'ComfyUI 已连接，但没有发现 CheckpointLoaderSimple 检查点模型。';
+  } catch (error) {
+    hint.textContent = `无法读取模型列表，请检查 ComfyUI/SSH 隧道；可手动输入。(${error.message})`;
+  } finally {
+    button.disabled = false;
+  }
+}
 async function collectConfigFromForm() {
   const cfg = await (await fetch('/api/config')).json();
   cfg.comfyui = cfg.comfyui || {};
@@ -2270,7 +2339,7 @@ async function collectConfigFromForm() {
   cfg.image_gen.provider_type = cfg.image_gen.provider === 'cloud' ? $('imgProviderType').value : (cfg.image_gen.provider === 'comfyui' ? 'comfyui' : 'openai');
   cfg.image_gen.local = Object.assign({}, cfg.image_gen.local, {url:$('imgLocalUrl').value.trim()});
   cfg.image_gen.cloud = Object.assign({}, cfg.image_gen.cloud, {base_url:$('imgCloudUrl').value.trim(), model:selectedImageModel(), api_key:$('imgCloudKey').value.trim()});
-  cfg.image_gen.comfyui = Object.assign({}, cfg.image_gen.comfyui, {server:$('serverInput').value.trim(), checkpoint:$('imgComfyuiCheckpoint').value.trim()});
+  cfg.image_gen.comfyui = Object.assign({}, cfg.image_gen.comfyui, {server:$('serverInput').value.trim(), checkpoint:selectedComfyuiCheckpoint()});
   return cfg;
 }
 
@@ -2425,6 +2494,11 @@ async function loadEnvironmentPlan() {
     environmentSetSummary('environmentPlanSummary', lines.join('\n'), d.status === 'blocked' ? 'error' : 'ok');
     $('btnEnvironmentDeploy').disabled = d.status !== 'plan_ready';
     const tasks = (d.download_tasks || []).map(item => item.filename).filter(Boolean);
+    if (tasks.length && d.status === 'plan_ready') {
+      setTimeout(() => {
+        if (environmentState.plan === d && !$('btnEnvironmentDeploy').disabled && !environmentState.job) deployEnvironment();
+      }, 0);
+    }
     $('environmentRetryStep').innerHTML = '<option value="">选择要重试的步骤</option>' + environmentStepNames.map(step => `<option value="${step}">${environmentStepLabels[step] || step}</option>`).join('');
     if (tasks.length) $('environmentPlanSummary').textContent += `\n需要下载：${tasks.join('、')}`;
   } catch (e) { environmentSetSummary('environmentPlanSummary', e.message, 'error'); }
@@ -2541,11 +2615,12 @@ async function loadConfigIntoForm() {
       if (img.cloud.model) { $('imgCloudModel').value = img.cloud.model; syncImageModelControls(img.cloud.model); }
       if (img.cloud.api_key) $('imgCloudKey').value = img.cloud.api_key;
     }
-    if (img.comfyui && img.comfyui.checkpoint) $('imgComfyuiCheckpoint').value = img.comfyui.checkpoint;
+    if (img.comfyui && img.comfyui.checkpoint) setComfyuiCheckpointValue(img.comfyui.checkpoint);
     const r2v = (c.models && c.models.r2v) || {};
     if (r2v.unet) $('r2vUnet').value = r2v.unet;
     if (r2v.clip) $('r2vClip').value = r2v.clip;
     toggleCfgBoxes();
+    await loadComfyuiCheckpointModels();
   } catch (e) {}
 }
 
@@ -2577,7 +2652,7 @@ async function saveConfig() {
         api_key: $('imgCloudKey').value.trim(),
         model: selectedImageModel(),
       },
-      comfyui: Object.assign({}, (cur.image_gen && cur.image_gen.comfyui) || {}, {server: $('serverInput').value.trim(), checkpoint: $('imgComfyuiCheckpoint').value.trim()}),
+      comfyui: Object.assign({}, (cur.image_gen && cur.image_gen.comfyui) || {}, {server: $('serverInput').value.trim(), checkpoint: selectedComfyuiCheckpoint()}),
     };
     cfg.models = cfg.models || {};
     cfg.models.r2v = {
@@ -2775,13 +2850,16 @@ function renderAssets() {
           style="width:100%;font-size:11px;padding:3px 2px;margin-top:3px">${viewMeta[v][1]} ${f ? '重生成' : viewMeta[v][0]}</button>
       </div>`;
     }).join('');
-    const gSel = (assetImgs.roleGender && assetImgs.roleGender[name]) || inferGender(r.role_desc || '');
-    const genderOpts = ['女', '男', '未知'].map(g =>
-      `<option value="${g}" ${gSel === g ? 'selected' : ''}>${g}</option>`).join('');
-    const prompt = assetPrompts.role[name] || defaultRolePrompt(r, gSel);
+    const roleType = roleTypeOf(name, r.role_desc || '');
+    const roleTypeOpts = [
+      ['human_male', '真人男性'], ['human_female', '真人女性'],
+      ['animal', '真实动物'], ['unknown', '未确定'],
+    ].map(([value, label]) =>
+      `<option value="${value}" ${roleType === value ? 'selected' : ''}>${label}</option>`).join('');
+    const prompt = assetPrompts.role[name] || defaultRolePrompt(r, roleType);
     return `<div class="card-item">
       <div class="r1"><span class="name">${esc(name)}</span>${verifyBadge('role', name)}
-        <select class="g-sel" onchange="setRoleGender(${i}, this.value)" style="width:70px;font-size:12px;padding:4px">${genderOpts}</select>
+        <select class="g-sel" onchange="setRoleType(${i}, this.value)" style="width:92px;font-size:12px;padding:4px">${roleTypeOpts}</select>
       </div>
       <div class="meta">${esc(r.role_desc || '')}</div>
       <img src="${img ? '/media/' + encodeURIComponent(img) : ''}" style="width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#f1f4f9;display:${img ? 'block':'none'}">
@@ -2839,6 +2917,30 @@ function inferGender(desc) {
   if (/女|女孩|少女|姑娘|她|辫子|裙/.test(d)) return '女';
   if (/男|男孩|少年|小伙子|他/.test(d)) return '男';
   return '未知';
+}
+
+function inferRoleType(desc) {
+  const d = String(desc || '');
+  if (/公鸡|母鸡|鸡|狗|猫|牛|马|羊|猪|鸟|狐狸|狼|鱼|兔|鹿|猴|蛇|熊|虎|豹|大象|动物/.test(d)) return 'animal';
+  if (/女|女孩|少女|姑娘|她|辫子|裙/.test(d)) return 'human_female';
+  if (/男|男孩|少年|小伙子|他/.test(d)) return 'human_male';
+  return 'unknown';
+}
+
+function normalizeRoleType(value, desc) {
+  const v = String(value || '').trim();
+  if (v === '女' || v === '女性' || v === 'female' || v === 'human_female') return 'human_female';
+  if (v === '男' || v === '男性' || v === 'male' || v === 'human_male') return 'human_male';
+  if (v === '动物' || v === 'animal') return 'animal';
+  if (v === '未知' || v === 'unknown') return 'unknown';
+  return inferRoleType(desc);
+}
+
+function roleTypeOf(name, desc) {
+  const explicit = assetImgs.roleType && assetImgs.roleType[name];
+  if (explicit) return normalizeRoleType(explicit, desc);
+  const legacy = assetImgs.roleGender && assetImgs.roleGender[name];
+  return normalizeRoleType(legacy, desc);
 }
 
 // ---------- 📋 资产状态表（身份/状态分开，P1） ----------
@@ -2935,8 +3037,10 @@ async function genAsset(kind, key, prompt, label, opts) {
     const baseKey = String(key).replace(/_(front|face|side|back)$/, '');
     const r = (currentScript.role_list || []).find(x => (x.role_name || x.name) === baseKey);
     const st = (assetState.roles && assetState.roles[baseKey]) || {};
+    const roleType = roleTypeOf(baseKey, (r && r.role_desc) || '');
     expected = {
-      gender: (assetImgs.roleGender && assetImgs.roleGender[baseKey]) || inferGender((r && r.role_desc) || '') || '未知',
+      role_type: roleType,
+      gender: roleType === 'human_female' ? '女' : roleType === 'human_male' ? '男' : '未知',
       hair: st.hair || '',
       costume: st.costume || '',
       look: [st.hair, st.costume].filter(Boolean).join('，') || prompt.slice(0, 120),
@@ -2950,9 +3054,18 @@ async function genAsset(kind, key, prompt, label, opts) {
     const roles = ((currentScript.storyboard_list || [])[idx] || {}).roles || [];
     expected = {look: prompt.slice(0, 160), people_count: Math.max(roles.length, 1)};
   }
+  const referenceImages = [];
+  if (opts.reference_images) {
+    for (const value of opts.reference_images) if (value && !referenceImages.includes(value)) referenceImages.push(value);
+  }
+  if (opts.reference_image && !referenceImages.includes(opts.reference_image)) referenceImages.push(opts.reference_image);
   const r = await fetch('/api/asset_gen', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({prompt, filename: fn, kind, expected}),
+    body: JSON.stringify({
+      prompt, filename: fn, kind, expected,
+      reference_image: referenceImages[0] || '',
+      reference_images: referenceImages,
+    }),
   });
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || '生图失败');
@@ -2963,14 +3076,19 @@ async function genAsset(kind, key, prompt, label, opts) {
   return d.filename;
 }
 
-function defaultRolePrompt(r, gender) {
-  const genderZh = {女: '年轻女性', 男: '年轻男性', 未知: ''}[gender] || '';
-  const genderEn = {女: 'a young Chinese woman', 男: 'a young Chinese man', 未知: ''}[gender] || '';
+function defaultRolePrompt(r, roleType) {
   const name = r.role_name || r.name || '';
   const desc = r.role_desc || '';
-  const gText = genderZh || '根据名字与描述判断性别';
-  const gEn = genderEn || 'gender according to the description';
-  return `${gZhHead(gText)}，${projectEraZh()}${desc || '人物'}。${gEn}，半身肖像照，真实人物照片风格，自然光，简洁干净背景，面部清晰，双眼有神，胶片质感，写实摄影，单一人像，画面内无文字、无其他人物、无多余肢体`;
+  const type = normalizeRoleType(roleType, desc);
+  const negative = '文字、字幕、logo、水印、书法、古画、插画、二次元、卡通、3D渲染、拼接、重复主体、额外人物、畸形肢体';
+  if (type === 'animal') {
+    return `${projectEraZh()}${desc || name || '真实动物'}，真实动物摄影，准确的物种细节、自然姿态和自然环境光，写实摄影与真实材质，单一动物主体，不得出现人脸或人体、不得穿人类服装、不得拟人化；负面：${negative}`;
+  }
+  if (type === 'human_male' || type === 'human_female') {
+    const human = type === 'human_female' ? '真实女性演员' : '真实男性演员';
+    return `${human}，${projectEraZh()}${desc || '人物'}，电影剧照，真实演员，真实人物照片风格，自然光，真实皮肤和服装材质，简洁干净背景，面部清晰，胶片质感，写实摄影，单一人物；负面：${negative}`;
+  }
+  return `${projectEraZh()}${desc || name || '现实世界主体'}，现实世界主体的写实摄影，电影剧照质感，自然光，真实材质与自然姿态，不猜测性别，不拟人化；负面：${negative}`;
 }
 function gZhHead(t) { return t; }
 
@@ -3008,18 +3126,20 @@ function defaultStoryPrompt(i) {
   const roleDesc = roles.map(r => {
     const n = r.role_name || r.name;
     const ap = assetPrompts.role[n] || '';
-    const gender = (assetImgs.roleGender && assetImgs.roleGender[n]) || inferGender(r.role_desc || '');
-    const g = gender === '女' ? '年轻女性' : gender === '男' ? '年轻男性' : '';
+    const roleType = roleTypeOf(n, r.role_desc || '');
+    const g = roleType === 'human_female' ? '真实女性演员' : roleType === 'human_male' ? '真实男性演员' : '';
     // 从锚点提示词里提取服装描述（碎花裙/外套等）
     const dress = (ap.match(/(身穿[^，。]*|穿[^，。]*)/) || [])[0] || '';
     const hair = (ap.match(/(扎[^，。]*|双[^，。]*辫|马尾[^，。]*)/) || [])[0] || '';
-    const bits = [g, hair, dress].filter(Boolean).join('，');
+    const bits = roleType === 'animal'
+      ? ['真实动物物种', r.role_desc || '', hair, dress].filter(Boolean).join('，')
+      : [g, hair, dress].filter(Boolean).join('，');
     return `${n}（${bits || r.role_desc || ''}）`;
   }).join('；');
   const roleLine = roleDesc ? `画面人物形象必须与角色设定一致：${roleDesc}。` : '';
   return p + `电影感故事板分镜图，竖构图，${projectEraZh()}风格，写实。${roleLine}`
     + `画面中严格只有剧本出现的 ${Math.max((currentScript.storyboard_list || [])[i] && ((currentScript.storyboard_list || [])[i].roles || []).length || 0, 1)} 个人，`
-    + `绝对没有额外人物、没有多余的肢体/手臂/手从画面外伸入，每人四肢完整、各两只手、手指清晰不粘连，`
+    + `绝对没有额外人物、没有多余的肢体/手臂/手从画面外伸入；动物保持真实物种，不拟人化；`
     + `服装道具正常无穿帮，无文字乱码，无重复人物，无塑料包装盒，无饮料瓶`
     + (projectEraZh().includes('乡村') ? '，无现代物品' : '')
     + `；背景元素必须与上面「场景」描述一致（门窗/设备/位置不得凭空增加或替换）`;
@@ -3030,7 +3150,7 @@ async function genRoleImg(i) {
   if (!r) return;
   const name = r.role_name || r.name;
   const ta = document.querySelector(`.asset-prompt[data-kind="role"][data-key="${CSS.escape(name)}"]`);
-  const prompt = (ta && ta.value.trim()) || defaultRolePrompt(r, assetImgs.roleGender && assetImgs.roleGender[name]);
+  const prompt = (ta && ta.value.trim()) || defaultRolePrompt(r, roleTypeOf(name, r.role_desc || ''));
   assetPrompts.role[name] = prompt;
   const btn = event.target; btn.disabled = true; btn.textContent = '生成中…';
   toastLoading(`🖼️ 正在生成「${name}」锚点图（约 10-30 秒）…`);
@@ -3050,10 +3170,21 @@ async function genRoleImg(i) {
   finally { btn.disabled = false; btn.textContent = '🖼️ 生成锚点图'; }
 }
 
-function roleViewPrompt(r, gender, view) {
+function roleViewPrompt(r, roleType, view) {
   const name = r.role_name || r.name;
   const st = (assetState.roles && assetState.roles[name]) || {};
-  const gText = {女: '年轻女性', 男: '年轻男性', 未知: ''}[gender] || '';
+  const type = normalizeRoleType(roleType, r.role_desc || '');
+  if (type === 'animal') {
+    const sameAnimal = `同一只真实动物“${name}”，物种与花色细节为${st.identity || '与正面锚点图相同'}，自然姿态，不得出现人脸或人体、不得穿人类服装、不得拟人化`;
+    const animalView = {
+      face: '头部特写，眼睛、喙/口鼻和羽毛或皮毛细节清晰',
+      side: '全身侧面真实动物摄影，90度侧面视角，站立或自然姿态',
+      back: '全身背面真实动物摄影，清晰展示背部、尾部和皮毛或羽毛',
+      front: '正面真实动物摄影，完整展示物种特征和自然姿态',
+    }[view] || '正面真实动物摄影';
+    return `${projectEraZh()}${r.role_desc || '真实动物'}，${animalView}，${sameAnimal}；自然光，真实材质，写实摄影，单一动物主体，画面无文字、无水印`;
+  }
+  const gText = {human_female: '真实女性演员', human_male: '真实男性演员'}[type] || '';
   const same = `同一人物「${name}」，身份${st.identity || '与正面锚点图相同'}、发型${st.hair || '一致'}、服装${st.costume || '一致'}，与正面锚点图完全同一人，不得改变五官、发型与服装`;
   const neg = `单一人像，无其他人物，无多余肢体/手指，无重复人物，无文字乱码，${projectEraZh()}风格，胶片质感，写实摄影`;
   if (view === 'face') {
@@ -3065,22 +3196,24 @@ function roleViewPrompt(r, gender, view) {
   if (view === 'back') {
     return `${gText}，${projectEraZh()}${r.role_desc || '人物'}。全身背面照，人物背对镜头，完整展现背影、背面发型与服装，${same}。${neg}`;
   }
-  return defaultRolePrompt(r, gender);
+  return defaultRolePrompt(r, type);
 }
 
 async function genRoleView(i, view) {
   const r = (currentScript.role_list || [])[i];
   if (!r) return;
   const name = r.role_name || r.name;
-  const gender = (assetImgs.roleGender && assetImgs.roleGender[name]) || inferGender(r.role_desc || '');
-  const prompt = roleViewPrompt(r, gender, view);
-  assetPrompts.role[name] = assetPrompts.role[name] || defaultRolePrompt(r, gender);
+  const roleType = roleTypeOf(name, r.role_desc || '');
+  const prompt = roleViewPrompt(r, roleType, view);
+  let referenceImage = '';
+  assetPrompts.role[name] = assetPrompts.role[name] || defaultRolePrompt(r, roleType);
   const btn = document.querySelector(`.rv-btn[data-i="${i}"][data-view="${view}"]`);
   if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
   const vLabel = {front: '正面', face: '脸部', side: '侧面', back: '背面'}[view];
   toastLoading(`🖼️ 正在生成「${name}」${vLabel}图（约 10-30 秒）…`);
   try {
-    const fn = await genAsset('role', `${name}_${view}`, prompt, '锚点', {view});
+    if (view !== 'front') referenceImage = await ensureRoleFront(i);
+    const fn = await genAsset('role', `${name}_${view}`, prompt, '锚点', {view, reference_image: referenceImage});
     assetImgs.roleViews = assetImgs.roleViews || {};
     assetImgs.roleViews[name] = assetImgs.roleViews[name] || {};
     assetImgs.roleViews[name][view] = fn;
@@ -3098,19 +3231,33 @@ async function genRoleView(i, view) {
   finally { if (btn) { btn.disabled = false; btn.textContent = {front: '🖼️ 正面', face: '👤 脸部', side: '↔️ 侧面', back: '⬅️ 背面'}[view]; } }
 }
 
+function roleFrontReference(name) {
+  const views = (assetImgs.roleViews && assetImgs.roleViews[name]) || {};
+  return views.front || assetImgs.role[name] || ((assetState.roles[name] || {}).reference || '');
+}
+
+async function ensureRoleFront(i) {
+  const r = (currentScript.role_list || [])[i];
+  if (!r) return '';
+  const name = r.role_name || r.name;
+  const existing = roleFrontReference(name);
+  if (existing) return existing;
+  await genRoleView(i, 'front');
+  return roleFrontReference(name);
+}
+
 async function genRoleFourViews(i) {
   const r = (currentScript.role_list || [])[i];
   if (!r) return;
   const name = r.role_name || r.name;
   assetImgs.roleViews = assetImgs.roleViews || {};
   assetImgs.roleViews[name] = assetImgs.roleViews[name] || {};
-  const missing = ['front', 'face', 'side', 'back'].filter(v => !assetImgs.roleViews[name][v]);
-  if (!missing.length) { toast(`✅ 「${name}」四视图已齐全`); return; }
-  toastLoading(`🧩 正在补齐「${name}」四视图（${missing.length} 张，每张约 10-30 秒）…`);
-  for (const v of missing) {
+  const views = ['front', 'face', 'side', 'back'];
+  toastLoading(`🧩 正在重新生成「${name}」四视图（4 张，每张约 10-30 秒）…`);
+  for (const v of views) {
     await genRoleView(i, v);
   }
-  toast(`✅ 「${name}」四视图生成完成`);
+  toast(`✅ 「${name}」四视图已重新生成`);
 }
 
 async function genSceneImg(i) {
@@ -3168,16 +3315,20 @@ async function genStoryImg(i) {
   finally { btn.disabled = false; btn.textContent = '🎬 生成分镜图'; }
 }
 
-function setRoleGender(i, g) {
+function setRoleType(i, roleType) {
   const r = (currentScript.role_list || [])[i];
   if (!r) return;
   const name = r.role_name || r.name;
-  assetImgs.roleGender = assetImgs.roleGender || {};
-  assetImgs.roleGender[name] = g;
-  // 更新提示词框为新的默认
+  assetImgs.roleType = assetImgs.roleType || {};
+  const type = normalizeRoleType(roleType, r.role_desc || '');
+  assetImgs.roleType[name] = type;
   const ta = document.querySelector(`.asset-prompt[data-kind="role"][data-key="${CSS.escape(name)}"]`);
-  if (ta) ta.value = defaultRolePrompt(r, g);
+  if (ta && !assetPrompts.role[name]) ta.value = defaultRolePrompt(r, type);
   autoSaveProject(true);
+}
+
+function setRoleGender(i, gender) {
+  setRoleType(i, normalizeRoleType(gender, ((currentScript.role_list || [])[i] || {}).role_desc || ''));
 }
 
 // ---------- 💬 对话修改生图提示词 ----------
@@ -3188,7 +3339,7 @@ function assetPromptOf(kind, key) {
     role: () => {
       const idx = (currentScript.role_list || []).findIndex(r => (r.role_name || r.name) === key);
       const r = (currentScript.role_list || [])[idx];
-      return assetPrompts.role[key] || defaultRolePrompt(r, (assetImgs.roleGender && assetImgs.roleGender[key]) || inferGender(r && r.role_desc || ''));
+      return assetPrompts.role[key] || defaultRolePrompt(r, roleTypeOf(key, r && r.role_desc || ''));
     },
     scene: () => assetPrompts.scene[key] || defaultScenePrompt(key),
     story: () => assetPrompts.story[key] || defaultStoryPrompt(key),
@@ -3254,41 +3405,32 @@ async function genAllAssets() {
   const sb = (currentScript.storyboard_list || []);
   const fourViews = $('genFourViews') ? $('genFourViews').checked : true;
   const viewZh = {front: '正面', face: '脸部', side: '侧面', back: '背面'};
-  // 收集待生成清单（只生成缺失的，支持断点续跑）
+  // 收集待生成清单：一键生成用于覆盖旧图，失败后再次点击可继续执行。
   const todo = [];
   roles.forEach((r, i) => {
     const name = r.role_name || r.name;
     ['front', 'face', 'side', 'back'].forEach(v => {
       if (!fourViews && v !== 'front') return;
-      const views = (assetImgs.roleViews && assetImgs.roleViews[name]) || {};
-      const has = v === 'front'
-        ? (views.front || assetImgs.role[name])
-        : views[v];
-      if (has) return;
       todo.push({label: `角色「${name}」${viewZh[v]}`, fn: () => genRoleViewAsset(i, v)});
     });
   });
   sceneNames.forEach(sc => {
-    if (!assetImgs.scene[sc]) {
-      todo.push({
+    todo.push({
         label: `场景「${sc}」`,
         fn: async () => {
           assetImgs.scene[sc] = await genAsset('scene', sc, defaultScenePrompt(sc), '场景');
           assetState.scenes[sc] = assetState.scenes[sc] || {};
           assetState.scenes[sc].reference = assetImgs.scene[sc];
         },
-      });
-    }
+    });
   });
   sb.forEach((s, i) => {
-    if (!assetImgs.story[i]) {
-      todo.push({
+    todo.push({
         label: `分镜 ${i + 1}`,
         fn: async () => {
           assetImgs.story[i] = await genAsset('story', `s${i + 1}`, defaultStoryPrompt(i), '分镜');
         },
-      });
-    }
+    });
   });
   const total = todo.length;
   if (!total) { toast('没有可生成的资产', true); return; }
@@ -3318,10 +3460,12 @@ async function genRoleViewAsset(i, view) {
   const r = (currentScript.role_list || [])[i];
   if (!r) return;
   const name = r.role_name || r.name;
-  const gender = (assetImgs.roleGender && assetImgs.roleGender[name]) || inferGender(r.role_desc || '');
-  const prompt = roleViewPrompt(r, gender, view);
-  assetPrompts.role[name] = assetPrompts.role[name] || defaultRolePrompt(r, gender);
-  const fn = await genAsset('role', `${name}_${view}`, prompt, '锚点', {view});
+  const roleType = roleTypeOf(name, r.role_desc || '');
+  const prompt = roleViewPrompt(r, roleType, view);
+  assetPrompts.role[name] = assetPrompts.role[name] || defaultRolePrompt(r, roleType);
+  let referenceImage = '';
+  if (view !== 'front') referenceImage = roleFrontReference(name);
+  const fn = await genAsset('role', `${name}_${view}`, prompt, '锚点', {view, reference_image: referenceImage});
   assetImgs.roleViews = assetImgs.roleViews || {};
   assetImgs.roleViews[name] = assetImgs.roleViews[name] || {};
   assetImgs.roleViews[name][view] = fn;
@@ -3551,7 +3695,7 @@ function renderDiagnosticImagePreview(result, runId, elapsedMs, requestedPrompt)
   const provider = $('imgProvider').value;
   const providerLabel = $('imgProvider').selectedOptions[0]?.textContent?.trim() || provider;
   const model = provider === 'comfyui'
-    ? ($('imgComfyuiCheckpoint').value.trim() || 'SDXL 默认检查点')
+    ? (selectedComfyuiCheckpoint() || 'SDXL 默认检查点')
     : provider === 'cloud'
       ? selectedImageModel()
       : 'Boogu-Image';
@@ -3687,6 +3831,27 @@ $('qualityMode').addEventListener('change', () => {
 });
 $('llmProvider').addEventListener('change', toggleCfgBoxes);
 $('imgProvider').addEventListener('change', () => { toggleCfgBoxes(); syncImageModelControls(); });
+$('serverInput').addEventListener('change', () => {
+  if ($('imgProvider').value === 'comfyui') loadComfyuiCheckpointModels();
+});
+$('imgComfyuiCheckpointSelect').addEventListener('change', () => {
+  $('imgComfyuiCheckpoint').value = '';
+  $('imgComfyuiCheckpoint').style.display = 'none';
+});
+$('imgComfyuiCheckpoint').addEventListener('input', () => {
+  $('imgComfyuiCheckpointSelect').value = '';
+});
+$('btnRefreshComfyuiCheckpoints').addEventListener('click', loadComfyuiCheckpointModels);
+$('btnManualComfyuiCheckpoint').addEventListener('click', () => {
+  const manual = $('imgComfyuiCheckpoint');
+  if (manual.style.display === 'none') {
+    manual.value = $('imgComfyuiCheckpointSelect').value || '';
+    manual.style.display = '';
+    manual.focus();
+  } else {
+    setComfyuiCheckpointValue(manual.value);
+  }
+});
 $('imgCloudModelSelect').addEventListener('change', () => {
   const custom = $('imgCloudModelSelect').value === '__custom__';
   $('imgCloudModel').style.display = custom ? '' : 'none';

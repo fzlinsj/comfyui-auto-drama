@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import math
+import mimetypes
 import os
 import random
 import re
@@ -39,14 +40,16 @@ try:
     from .task_service import TaskPreparationError, TaskService
     from .service_diagnostics import ServiceDiagnostics, SERVICES
     from .environment_manager import EnvironmentManager
-    from workflows.build_sdxl_graph import build_sdxl_graph
+    from .environment_verifier import ComfyUIWorkflowVerifier
+    from workflows.build_sdxl_graph import build_sdxl_graph, build_sdxl_identity_graph
 except ImportError:
     from comfyui_client import ComfyUIClient
     from task_store import TaskStore
     from task_service import TaskPreparationError, TaskService
     from service_diagnostics import ServiceDiagnostics, SERVICES
     from environment_manager import EnvironmentManager
-    from workflows.build_sdxl_graph import build_sdxl_graph
+    from environment_verifier import ComfyUIWorkflowVerifier
+    from workflows.build_sdxl_graph import build_sdxl_graph, build_sdxl_identity_graph
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)  # 项目根（config.json 所在目录）
@@ -135,6 +138,7 @@ _CONFIG = load_config()
 DEFAULT_SERVER = _CONFIG["comfyui"]["server"]
 DEFAULT_WORKFLOW_DIR = _abs_path(_CONFIG["comfyui"]["workflow_dir"])
 OUTPUTS_DIR = _abs_path(_CONFIG["storage"]["output_dir"])
+LEGACY_OUTPUTS_DIR = os.path.join(BASE_DIR, "comfyui_backup", "outputs")
 IMAGE_DIRS = [_abs_path(d) for d in _CONFIG["storage"]["asset_dirs"]]
 LMSTUDIO_URL = _CONFIG["llm"]["local"]["url"]
 LMSTUDIO_MODEL = _CONFIG["llm"]["local"]["model"]
@@ -190,6 +194,7 @@ def get_service_diagnostics():
         _SERVICE_DIAGNOSTICS = ServiceDiagnostics(
             store=get_task_store(), config=_CONFIG,
             comfy_client_factory=lambda server: ComfyUIClient(server),
+            output_dir=OUTPUTS_DIR,
         )
     return _SERVICE_DIAGNOSTICS
 
@@ -197,7 +202,13 @@ def get_service_diagnostics():
 def get_environment_manager():
     global _ENVIRONMENT_MANAGER
     if _ENVIRONMENT_MANAGER is None:
-        _ENVIRONMENT_MANAGER = EnvironmentManager(get_task_store())
+        _ENVIRONMENT_MANAGER = EnvironmentManager(
+            get_task_store(),
+            verifier=ComfyUIWorkflowVerifier(
+                DEFAULT_SERVER,
+                client_factory=lambda server: ComfyUIClient(server),
+            ),
+        )
     return _ENVIRONMENT_MANAGER
 
 
@@ -325,6 +336,24 @@ def find_image(filename):
         p = os.path.join(d, filename)
         if os.path.isfile(p):
             return p
+    return None
+
+
+def find_media_path(filename):
+    """Resolve assets and generated outputs, including the legacy console-relative directory."""
+    for directory in IMAGE_DIRS:
+        path = os.path.join(directory, filename)
+        if os.path.isfile(path):
+            return path
+    seen = set()
+    for directory in (OUTPUTS_DIR, LEGACY_OUTPUTS_DIR):
+        normalized = os.path.normcase(os.path.abspath(directory))
+        if normalized in seen or not os.path.isdir(directory):
+            continue
+        seen.add(normalized)
+        for root, _, files in os.walk(directory):
+            if filename in files:
+                return os.path.join(root, filename)
     return None
 
 
@@ -2920,6 +2949,28 @@ def boogu_check(timeout=4):
         return {"ok": False, "error": str(e)}
 
 
+REALISTIC_DRAMA_NEGATIVE_PROMPT = (
+    "text, subtitles, logo, watermark, calligraphy, ancient painting, illustration, anime, "
+    "cartoon, 3D render, collage, duplicate subject, extra person, deformed anatomy, "
+    "文字、字幕、logo、水印、书法、古画、插画、二次元、卡通、3D渲染、拼接、重复主体、额外人物、畸形肢体"
+)
+
+
+def _merge_negative_prompt(value):
+    parts = [str(value or "").strip(), REALISTIC_DRAMA_NEGATIVE_PROMPT]
+    return ", ".join(dict.fromkeys(part for part in parts if part))
+
+
+def _validate_comfyui_checkpoint(endpoint):
+    checkpoint = str((endpoint or {}).get("model") or "").strip()
+    if not checkpoint:
+        raise RuntimeError(
+            "ComfyUI checkpoint 未配置，请在 config.json 的 "
+            "image_gen.comfyui.checkpoint 中填写实际模型文件名"
+        )
+    return checkpoint
+
+
 def _image_gen_endpoints():
     """返回 (主端点, 备用端点)；image_gen 配置。"""
     cfg = _CONFIG["image_gen"]
@@ -2928,7 +2979,7 @@ def _image_gen_endpoints():
             "provider": "comfyui",
             "provider_type": "comfyui",
             "url": str((_CONFIG.get("comfyui") or {}).get("server") or "").rstrip("/"),
-            "model": str((cfg.get("comfyui") or {}).get("checkpoint") or "sd_xl_base_1.0.safetensors"),
+            "model": str((cfg.get("comfyui") or {}).get("checkpoint") or "").strip(),
         }, None
     ptype = str(cfg.get("provider_type") or "openai").strip() or "openai"
     local = {"url": str(cfg["local"]["url"] or "").rstrip("/"), "provider": "local", "provider_type": "openai"}
@@ -2945,15 +2996,59 @@ def _image_gen_endpoints():
     return local, cloud if cloud["enabled"] and cloud["url"] else None
 
 
-def _img_comfyui(ep, prompt, filename, size="768x1024", timeout=300):
+def _resolve_reference_images(reference_images):
+    """Resolve browser asset names to local files without accepting missing anchors."""
+    if reference_images is None:
+        return []
+    if isinstance(reference_images, (str, bytes)):
+        reference_images = [reference_images]
+    resolved = []
+    for value in reference_images:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        path = raw if os.path.isabs(raw) and os.path.isfile(raw) else find_image(raw)
+        if not path or not os.path.isfile(path):
+            raise RuntimeError(f"身份参考图不存在：{raw}")
+        resolved.append(path)
+    return resolved
+
+
+def _img_comfyui(ep, prompt, filename, size="768x1024", timeout=300, reference_images=None):
     """Run the standard SDXL image graph through the selected ComfyUI server."""
     server = str(ep.get("url") or "").rstrip("/")
     if not server:
         raise RuntimeError("ComfyUI 生图服务器地址未配置")
+    checkpoint = _validate_comfyui_checkpoint(ep)
     match = re.match(r"^(\d+)\s*[xX]\s*(\d+)$", str(size or ""))
     width, height = (int(match.group(1)), int(match.group(2))) if match else (768, 1024)
     client = ComfyUIClient(server)
-    graph = build_sdxl_graph({"prompt": prompt, "width": width, "height": height, "steps": 12, "filename_prefix": "assets/diagnostic"})
+    references = _resolve_reference_images(reference_images)
+    request = {
+        "prompt": prompt,
+        "checkpoint": checkpoint,
+        "width": width,
+        "height": height,
+        "steps": ep.get("steps") or 20,
+        "cfg": ep.get("cfg") or 7.0,
+        "sampler": ep.get("sampler") or "dpmpp_2m",
+        "scheduler": ep.get("scheduler") or "karras",
+        "negative_prompt": _merge_negative_prompt(ep.get("negative_prompt")),
+        "filename_prefix": "assets/diagnostic",
+    }
+    if references:
+        client_info = client.object_info()
+        uploaded = client.upload_image(references[0], os.path.basename(references[0]))
+        uploaded_name = str((uploaded or {}).get("name") or "").strip()
+        if not uploaded_name:
+            raise RuntimeError("ComfyUI 参考图上传失败：/upload/image 未返回文件名")
+        request["reference_image"] = uploaded_name
+        request["ipadapter_preset"] = ep.get("ipadapter_preset") or "PLUS_FACE"
+        request["ipadapter_model"] = ep.get("ipadapter_model") or ""
+        request["ipadapter_weight"] = ep.get("ipadapter_weight") or 0.85
+        graph = build_sdxl_identity_graph(request, client_info)
+    else:
+        graph = build_sdxl_graph(request)
     preflight = client.preflight(graph)
     if not preflight.get("ok"):
         raise RuntimeError("ComfyUI 生图预检失败：" + json.dumps(preflight, ensure_ascii=False))
@@ -2982,10 +3077,13 @@ def _img_comfyui(ep, prompt, filename, size="768x1024", timeout=300):
     return os.path.basename(filename), destination
 
 
-def _img_openai(ep, prompt, filename, size="768x1024", timeout=300):
+def _img_openai(ep, prompt, filename, size="768x1024", timeout=300, reference_images=None):
     """OpenAI 兼容文生图适配器（/v1/images/generations，b64 或 url 返回）。"""
     if not ep.get("url"):
         raise RuntimeError("云端文生图端点未配置")
+    references = _resolve_reference_images(reference_images)
+    if references:
+        return _img_openai_edit(ep, prompt, filename, size, timeout, references)
     payload = {
         "model": ep.get("model") or "gpt-image-1",
         "prompt": prompt,
@@ -3014,6 +3112,55 @@ def _img_openai(ep, prompt, filename, size="768x1024", timeout=300):
     dest = os.path.join(IMAGE_DIRS[0], filename)
     with open(dest, "wb") as f:
         f.write(raw)
+    return filename, dest
+
+
+def _multipart_image_request(url, fields, files, headers=None):
+    boundary = "----BatchConsole" + uuid.uuid4().hex
+    chunks = []
+    for name, value in fields.items():
+        chunks.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        )
+    for name, path in files:
+        filename = os.path.basename(path)
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        chunks.extend([
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+            f"Content-Type: {mime}\r\n\r\n".encode(),
+            raw,
+            b"\r\n",
+        ])
+    chunks.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        url,
+        data=b"".join(chunks),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}", **(headers or {})},
+    )
+    with _opener().open(req, timeout=300) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _img_openai_edit(ep, prompt, filename, size, timeout, references):
+    data = _multipart_image_request(
+        _v1(ep["url"]) + "/images/edits",
+        {"model": ep.get("model") or "gpt-image-1", "prompt": prompt, "size": size, "n": "1"},
+        [("image[]", path) for path in references],
+        _lm_headers(ep.get("api_key") or ""),
+    )
+    item = (data.get("data") or [{}])[0]
+    raw = base64.b64decode(item["b64_json"]) if item.get("b64_json") else None
+    if raw is None and item.get("url"):
+        with _opener().open(item["url"], timeout=timeout) as response:
+            raw = response.read()
+    if not raw:
+        raise RuntimeError("云端参考图编辑未返回图片")
+    _ensure_image_dirs()
+    dest = os.path.join(IMAGE_DIRS[0], filename)
+    with open(dest, "wb") as handle:
+        handle.write(raw)
     return filename, dest
 
 
@@ -3048,10 +3195,32 @@ def _agnes_payload(prompt, size, model):
     }
 
 
-def _img_agnes(ep, prompt, filename, size="768x1024", timeout=300):
+def _img_agnes(ep, prompt, filename, size="768x1024", timeout=300, reference_images=None):
     """Agnes Image API 适配器：按官方格式请求并下载 URL/b64 图片。"""
     if not ep.get("url"):
         raise RuntimeError("Agnes 生图端点未配置")
+    references = _resolve_reference_images(reference_images)
+    if references:
+        data = _multipart_image_request(
+            _v1(ep["url"]) + "/images/edits",
+            {"model": ep.get("model") or "agnes-image-2.5-flash", "prompt": prompt, "size": size, "n": "1"},
+            [("image[]", path) for path in references],
+            _lm_headers(ep.get("api_key") or ""),
+        )
+        item = (data.get("data") or [{}])[0]
+        b64 = item.get("b64_json")
+        if b64:
+            raw = base64.b64decode(b64)
+        elif item.get("url"):
+            with _opener().open(item["url"], timeout=timeout) as fr:
+                raw = fr.read()
+        else:
+            raise RuntimeError("Agnes 参考图编辑未返回图片")
+        _ensure_image_dirs()
+        dest = os.path.join(IMAGE_DIRS[0], filename)
+        with open(dest, "wb") as f:
+            f.write(raw)
+        return filename, dest
     payload = _agnes_payload(prompt, size, ep.get("model"))
     req = urllib.request.Request(
         _v1(ep["url"]) + "/images/generations",
@@ -3146,16 +3315,16 @@ def _image_adapter_type(ep):
     return atype
 
 
-def boogu_generate(prompt, filename, size="768x1024", timeout=300):
+def boogu_generate(prompt, filename, size="768x1024", timeout=300, reference_images=None):
     """文生图统一入口：本地 Boogu 优先，配置云端或本地失败时降级云端。"""
     main, backup = _image_gen_endpoints()
     if main.get("provider") == "comfyui":
-        return _img_comfyui(main, prompt, filename, size, timeout)
+        return _img_comfyui(main, prompt, filename, size, timeout, reference_images=reference_images)
     last_err = None
     if main.get("provider") == "cloud":
         try:
             atype = _image_adapter_type(main)
-            return _IMG_ADAPTERS.get(atype, _img_openai)(main, prompt, filename, size, timeout)
+            return _IMG_ADAPTERS.get(atype, _img_openai)(main, prompt, filename, size, timeout, reference_images=reference_images)
         except Exception as e:
             last_err = e
             if atype == "agnes" or backup is None or backup.get("provider") != "local":
@@ -3167,7 +3336,7 @@ def boogu_generate(prompt, filename, size="768x1024", timeout=300):
         last_err = e
         if backup and backup.get("provider") == "cloud":
             atype = _image_adapter_type(backup)
-            return _IMG_ADAPTERS.get(atype, _img_openai)(backup, prompt, filename, size, timeout)
+            return _IMG_ADAPTERS.get(atype, _img_openai)(backup, prompt, filename, size, timeout, reference_images=reference_images)
         raise
 
 
@@ -3262,33 +3431,46 @@ def verify_asset(image_path, kind, expected=None, timeout=120):
     """质检图片：角色（性别/服装）、场景（无人/无现代物品）、分镜（形象/穿帮）。"""
     expected = expected or {}
     if kind == "role":
+        role_type = str(expected.get("role_type") or "").strip().lower()
+        if role_type == "animal":
+            species = str(expected.get("species") or expected.get("look") or "真实动物").strip()
+            q = (
+                "你是图片质检员。检查这张角色参考图是否是指定的真实动物物种，严格只输出 JSON："
+                '{"ok": true或false, "issues": ["问题1", ...]}\n'
+                f"检查项目：1. 主体必须是自然状态的真实动物，物种描述为：{species}；"
+                "2. 不得出现人脸、人体、人类手脚或人类服装，不得拟人化；"
+                "3. 物种解剖、皮毛/羽毛、姿态自然，画面无文字、水印、重复主体。\n"
+                "全部通过时 ok=true，否则 ok=false 并列出具体问题。"
+            )
+        else:
+            q = None
         gender = expected.get("gender") or "未知"
         look = expected.get("look") or ""
         hair = expected.get("hair") or ""
         costume = expected.get("costume") or ""
         check_look = "；".join(x for x in [hair, costume] if x) or look
         view = expected.get("view")
-        if view == "side":
+        if q is None and view == "side":
             q = (f"你是图片质检员。检查这张角色侧面参考图（90度正侧面），严格只输出 JSON："
                  f"{{\"ok\": true或false, \"issues\": [\"问题1\", ...]}}\n"
                  f"检查项：1. 人物侧面轮廓、发型、服装必须与设定一致：{check_look} "
                  f"2. 侧面视角正常（人物侧身站立，面部朝向画面侧面，不要求正脸） "
                  f"3. 画面干净：无多余肢体/多余手指、无重复人物、无文字乱码、无现代物品。\n"
                  "ok=true 表示全部通过；否则 ok=false 并列出具体问题。")
-        elif view == "back":
+        elif q is None and view == "back":
             q = (f"你是图片质检员。检查这张角色背面参考图，严格只输出 JSON："
                  f"{{\"ok\": true或false, \"issues\": [\"问题1\", ...]}}\n"
                  f"检查项：1. 背面视角正常（人物背对镜头，看不到正脸属正常） "
                  f"2. 发型与服装必须与设定一致：{check_look} "
                  f"3. 画面干净：无多余肢体/多余手指、无重复人物、无文字乱码、无现代物品。\n"
                  "ok=true 表示全部通过；否则 ok=false 并列出具体问题。")
-        elif view == "face":
+        elif q is None and view == "face":
             q = (f"你是图片质检员。检查这张角色脸部特写参考图，严格只输出 JSON："
                  f"{{\"ok\": true或false, \"issues\": [\"问题1\", ...]}}\n"
                  f"检查项：1. 五官清晰、面部占画面主体 2. 发型与设定一致：{hair or check_look} "
                  f"3. 人物性别必须是「{gender}」 4. 画面干净：无多余肢体/手指、无重复人物、无文字乱码。\n"
                  "ok=true 表示全部通过；否则 ok=false 并列出具体问题。")
-        else:
+        elif q is None:
             q = (f"你是图片质检员。检查这张角色锚点图，严格只输出 JSON：{{\"ok\": true或false, \"issues\": [\"问题1\", ...]}}\n"
                  f"检查项：1. 人物性别必须是「{gender}」 2. 发型服装必须与设定一字不差一致：{check_look} "
                  f"3. 画面干净：无多余肢体/多余手指、无重复人物、无文字乱码、无现代物品 4. 面部清晰五官正常。\n"
@@ -4167,6 +4349,18 @@ class Handler(BaseHTTPRequestHandler):
             server = qs.get("server", [DEFAULT_SERVER])[0]
             self._send(200, json.dumps(get_status(server), ensure_ascii=False))
             return
+        if path.path == "/api/comfyui/checkpoints":
+            qs = urllib.parse.parse_qs(path.query)
+            server = str(qs.get("server", [DEFAULT_SERVER])[0] or DEFAULT_SERVER).strip().rstrip("/")
+            if not server:
+                self._send(400, json.dumps({"ok": False, "error": "ComfyUI server 地址为空"}, ensure_ascii=False))
+                return
+            try:
+                models = ComfyUIClient(server).checkpoint_models()
+                self._send(200, json.dumps({"ok": True, "server": server, "models": models}, ensure_ascii=False))
+            except Exception as exc:
+                self._send(502, json.dumps({"ok": False, "server": server, "error": f"无法读取 ComfyUI 模型列表：{exc}"}, ensure_ascii=False))
+            return
         if path.path == "/api/tasks/control":
             qs = urllib.parse.parse_qs(path.query)
             project_name = qs.get("project", [""])[0]
@@ -4329,48 +4523,29 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.path.startswith("/media/"):
             fn = urllib.parse.unquote(path.path[len("/media/"):])
-            for d in IMAGE_DIRS:
-                p = os.path.join(d, fn)
-                if os.path.isfile(p):
-                    ctype = "image/png"
-                    if fn.lower().endswith((".jpg", ".jpeg")):
-                        ctype = "image/jpeg"
-                    elif fn.lower().endswith(".webp"):
-                        ctype = "image/webp"
-                    elif fn.lower().endswith(".mp4"):
-                        ctype = "video/mp4"
-                    if ctype.startswith("video/"):
-                        self._send_media(p, ctype)
-                    else:
-                        with open(p, "rb") as f:
-                            data = f.read()
-                        self._send(200, data, ctype)
-                    return
             # 生成视频：递归查 outputs 目录
-            if os.path.isdir(OUTPUTS_DIR):
-                for root, _, files in os.walk(OUTPUTS_DIR):
-                    if fn in files:
-                        p = os.path.join(root, fn)
-                        lower = fn.lower()
-                        ctype = "video/mp4"
-                        if lower.endswith(".png"):
-                            ctype = "image/png"
-                        elif lower.endswith((".jpg", ".jpeg")):
-                            ctype = "image/jpeg"
-                        elif lower.endswith(".webp"):
-                            ctype = "image/webp"
-                        elif lower.endswith(".gif"):
-                            ctype = "image/gif"
-                        elif lower.endswith(".webm"):
-                            ctype = "video/webm"
-                        elif lower.endswith(".mov"):
-                            ctype = "video/quicktime"
-                        if ctype.startswith("video/"):
-                            self._send_media(p, ctype)
-                        else:
-                            with open(p, "rb") as f:
-                                self._send(200, f.read(), ctype)
-                        return
+            p = find_media_path(fn)
+            if p:
+                lower = fn.lower()
+                ctype = "video/mp4"
+                if lower.endswith(".png"):
+                    ctype = "image/png"
+                elif lower.endswith((".jpg", ".jpeg")):
+                    ctype = "image/jpeg"
+                elif lower.endswith(".webp"):
+                    ctype = "image/webp"
+                elif lower.endswith(".gif"):
+                    ctype = "image/gif"
+                elif lower.endswith(".webm"):
+                    ctype = "video/webm"
+                elif lower.endswith(".mov"):
+                    ctype = "video/quicktime"
+                if ctype.startswith("video/"):
+                    self._send_media(p, ctype)
+                else:
+                    with open(p, "rb") as f:
+                        self._send(200, f.read(), ctype)
+                return
             self._send(404, json.dumps({"error": "not found"}, ensure_ascii=False))
             return
         if path.path == "/api/records":
@@ -4505,6 +4680,9 @@ class Handler(BaseHTTPRequestHandler):
             filename = body.get("filename", "")
             kind = body.get("kind", "story")
             expected = body.get("expected") or {}
+            reference_images = body.get("reference_images")
+            if reference_images is None and body.get("reference_image"):
+                reference_images = [body.get("reference_image")]
             if not prompt.strip() or not filename.strip():
                 self._send(400, json.dumps({"error": "缺少 prompt 或 filename"}, ensure_ascii=False))
                 return
@@ -4512,7 +4690,12 @@ class Handler(BaseHTTPRequestHandler):
             last_fn, last_issues = None, []
             while attempts < 3:
                 try:
-                    fn, dest = boogu_generate(prompt, filename, "768x1024")
+                    fn, dest = boogu_generate(
+                        prompt,
+                        filename,
+                        "768x1024",
+                        reference_images=reference_images,
+                    )
                 except Exception as e:
                     self._send(400, json.dumps({"error": _image_error_message(e)}, ensure_ascii=False))
                     return
@@ -4555,9 +4738,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not lp:
                     continue
                 r = ast.get("roles", {}).get(name) or {}
+                role_type = (ai.get("roleType") or {}).get(name)
+                if not role_type:
+                    legacy_gender = (ai.get("roleGender") or {}).get(name)
+                    role_type = "human_female" if legacy_gender == "女" else "human_male" if legacy_gender == "男" else "unknown"
                 expected = {
-                    "gender": (ai.get("roleGender") or {}).get(name)
-                              or (lambda: "女" if "女" in str(r.get("identity") or r.get("costume") or "") else "未知")(),
+                    "role_type": role_type,
+                    "gender": "女" if role_type == "human_female" else "男" if role_type == "human_male" else "未知",
                     "hair": r.get("hair") or "",
                     "costume": r.get("costume") or "",
                     "look": "",

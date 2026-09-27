@@ -38,10 +38,11 @@ def _strip_fingerprint_fields(value):
 
 
 class EnvironmentManager:
-    def __init__(self, store, session_factory=None, downloader_factory=None):
+    def __init__(self, store, session_factory=None, downloader_factory=None, verifier=None):
         self.store = store
         self.session_factory = session_factory or (lambda connection, credential=None: SSHSession(connection, credential=credential))
         self.downloader_factory = downloader_factory
+        self.verifier = verifier
         self._sessions = {}
         self._plans = {}
         self._deployers = {}
@@ -121,6 +122,7 @@ class EnvironmentManager:
         )
         plan_payload = plan.to_dict()
         plan_payload.update({"plan_id": plan_id, "target_id": target_id, "scan_id": scan_id, "recipe_id": recipe_id, "recipe_version": recipe["version"]})
+        plan_payload["scan"] = scan_row.get("summary") or {}
         with self._lock:
             self._plans[plan_id] = {"plan": plan_payload, "recipe": recipe, "scan": scan_row.get("summary") or {}}
         return plan_payload
@@ -154,6 +156,7 @@ class EnvironmentManager:
                 session=session,
                 downloader=downloader,
                 store=self.store,
+                verifier=self.verifier,
                 progress_callback=lambda result, job_id=job_id: self._update_job_progress(job_id, result),
             )
             self._deployers[job_id] = deployer
@@ -245,6 +248,7 @@ class EnvironmentManager:
         runtime = build_plan(scan.get("summary") or {}, recipe)
         payload = runtime.to_dict()
         payload.update({"plan_id": plan_id, "target_id": row["target_id"], "scan_id": row["scan_id"], "recipe_id": row["recipe_id"], "recipe_version": row["recipe_version"]})
+        payload["scan"] = scan.get("summary") or {}
         cached = {"plan": payload, "recipe": recipe, "scan": scan.get("summary") or {}}
         with self._lock:
             self._plans[plan_id] = cached

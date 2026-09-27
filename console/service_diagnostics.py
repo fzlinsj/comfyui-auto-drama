@@ -212,17 +212,31 @@ class _NullAdapter:
 class _ComfyDiagnosticAdapter:
     """Run a real API graph and validate the first downloaded output."""
 
-    def __init__(self, client, output_dir):
+    def __init__(self, client, output_dir, config=None):
         self.client, self.output_dir = client, output_dir
+        image_cfg = (config or {}).get("image_gen") or {}
+        self.image_cfg = image_cfg.get("comfyui") or {}
 
     def _graph(self, service, parameters=None):
         parameters = parameters if isinstance(parameters, dict) else {}
         prompt = str(parameters.get("prompt") or "").strip() or "A neutral diagnostic test"
+        quality = dict(self.image_cfg)
+        quality.update({key: value for key, value in parameters.items() if key != "prompt" and value is not None})
         task = {"prompt": prompt, "duration": 5, "seed": 12345,
                 "steps": 4, "mp": 0.2, "prefix": "diagnostics/comfyui"}
         if service == "comfyui_image":
-            return build_sdxl_graph({"prompt": task["prompt"], "width": 768, "height": 768,
-                                     "steps": 4, "filename_prefix": task["prefix"]})
+            return build_sdxl_graph({
+                "prompt": task["prompt"],
+                "checkpoint": quality.get("checkpoint"),
+                "width": quality.get("width") or parameters.get("width") or 768,
+                "height": quality.get("height") or parameters.get("height") or 768,
+                "steps": quality.get("steps") or 20,
+                "cfg": quality.get("cfg") or 7.0,
+                "sampler": quality.get("sampler") or "dpmpp_2m",
+                "scheduler": quality.get("scheduler") or "karras",
+                "negative_prompt": quality.get("negative_prompt"),
+                "filename_prefix": task["prefix"],
+            })
         if service == "comfyui_t2v":
             return convert_t2v(dict(task, mode="t2v"))
         image_path = os.path.join(self.output_dir, "diagnostic_reference.png")
@@ -308,7 +322,7 @@ class ServiceDiagnostics:
             comfy = self._comfy_client_factory(endpoint) if endpoint else _NullAdapter("comfyui")
             self.adapters["comfyui"] = comfy
         for mode in COMFY_MODES:
-            self.adapters.setdefault(mode, _ComfyDiagnosticAdapter(comfy, self.output_dir))
+            self.adapters.setdefault(mode, _ComfyDiagnosticAdapter(comfy, self.output_dir, self.config))
         llm_cfg = self.config.get("llm") or {}
         llm_mode = llm_cfg.get("provider") or "local"
         llm_part = llm_cfg.get("cloud" if llm_mode == "cloud" else "local") or {}
@@ -428,9 +442,17 @@ class ServiceDiagnostics:
         run_parameters = self._parameters(service)
         supplied = parameters if isinstance(parameters, dict) else {}
         if service in {"agnes", "boogu", "image", "comfyui_image"}:
+            if service == "comfyui_image":
+                configured = ((self.config.get("image_gen") or {}).get("comfyui") or {})
+                for key, value in configured.items():
+                    if value is not None:
+                        run_parameters[key] = value
             prompt = str(supplied.get("prompt") or "").strip()
             if prompt:
                 run_parameters["prompt"] = prompt[:4000]
+            for key, value in supplied.items():
+                if key != "prompt" and value is not None:
+                    run_parameters[key] = value
         run_id = self.store.create_diagnostic_run(service, "real", run_parameters)
         with self._lock:
             self._results[service] = self._entry(service, "real", "running", time.monotonic(), "真实测试运行中", {"run_id": run_id, "parameters": run_parameters})

@@ -87,6 +87,58 @@ class AgnesImageTests(unittest.TestCase):
             self.assertEqual(request_payload["ratio"], "3:4")
             self.assertTrue(request_payload["return_base64"])
 
+    def test_comfyui_image_uses_selected_checkpoint_and_quality_settings(self):
+        class FakeComfyClient:
+            submitted_graph = None
+
+            def __init__(self, server):
+                self.server = server
+
+            def preflight(self, graph):
+                return {"ok": True}
+
+            def submit(self, graph, client_id=None):
+                type(self).submitted_graph = graph
+                return {"prompt_id": "image-prompt"}
+
+            def history(self, prompt_id):
+                return {
+                    prompt_id: {
+                        "outputs": {
+                            "7": {"images": [{"filename": "image.png", "subfolder": "", "type": "output"}]}
+                        }
+                    }
+                }
+
+            def download_output(self, output, destination):
+                Path(destination).write_bytes(b"generated image")
+
+        endpoint = {
+            "url": "http://127.0.0.1:6006",
+            "model": "cinematic-xl.safetensors",
+            "steps": 30,
+            "cfg": 6.0,
+            "sampler": "euler_ancestral",
+            "scheduler": "normal",
+        }
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(bc, "ComfyUIClient", FakeComfyClient), \
+             patch.object(bc, "IMAGE_DIRS", [tmp]):
+            bc._img_comfyui(endpoint, "电影感产品主视觉，主体清晰", "test.png", "896x1152", timeout=1)
+
+        graph = FakeComfyClient.submitted_graph
+        checkpoint = next(node for node in graph.values() if node["class_type"] == "CheckpointLoaderSimple")
+        latent = next(node for node in graph.values() if node["class_type"] == "EmptyLatentImage")
+        sampler = next(node for node in graph.values() if node["class_type"] == "KSampler")
+        prompts = [node["inputs"].get("text") for node in graph.values() if node["class_type"] == "CLIPTextEncode"]
+        self.assertEqual(checkpoint["inputs"]["ckpt_name"], endpoint["model"])
+        self.assertEqual((latent["inputs"]["width"], latent["inputs"]["height"]), (896, 1152))
+        self.assertEqual(sampler["inputs"]["steps"], 30)
+        self.assertEqual(sampler["inputs"]["cfg"], 6.0)
+        self.assertEqual(sampler["inputs"]["sampler_name"], "euler_ancestral")
+        self.assertEqual(sampler["inputs"]["scheduler"], "normal")
+        self.assertIn("电影感产品主视觉，主体清晰", prompts)
+
 
 if __name__ == "__main__":
     unittest.main()
