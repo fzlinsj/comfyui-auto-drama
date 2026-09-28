@@ -55,8 +55,13 @@ def _input_spec(object_info, class_type):
 
 def _choices(spec):
     if isinstance(spec, (list, tuple)) and spec:
-        values = spec[0]
-        if isinstance(values, (list, tuple)):
+        values = spec[0] if isinstance(spec[0], (list, tuple)) else spec
+        values = [value for value in values if isinstance(value, str)]
+        if values and not all(value.upper() in {
+            "MODEL", "CLIP", "VAE", "IMAGE", "LATENT", "CONDITIONING",
+            "IPADAPTER", "CLIP_VISION", "CONTROL_NET", "STRING", "INT",
+            "FLOAT", "BOOLEAN", "SAMPLER_NAME", "SCHEDULER",
+        } for value in values):
             return [str(value) for value in values]
     return []
 
@@ -82,6 +87,25 @@ def _set_if_required(inputs, required, name, value):
         inputs[name] = value
 
 
+def _pick_input_choice(requested, spec, fallback):
+    """Use a node's advertised enum instead of assuming one plugin version."""
+    choices = _choices(spec)
+    if not choices:
+        return requested if requested not in (None, "") else fallback
+    requested = str(requested or "").strip()
+    if requested in choices:
+        return requested
+    normalized = requested.replace("_", " ").lower()
+    if normalized:
+        for choice in choices:
+            if choice.replace("_", " ").lower() == normalized:
+                return choice
+    fallback = str(fallback or "")
+    if fallback in choices:
+        return fallback
+    return choices[0]
+
+
 def build_sdxl_identity_graph(request=None, object_info=None):
     """Build the SDXL graph with an IPAdapter identity anchor.
 
@@ -99,6 +123,13 @@ def build_sdxl_identity_graph(request=None, object_info=None):
         None,
     )
     model_loader = "IPAdapterModelLoader" in object_info
+    clip_required, _ = _input_spec(object_info, "CLIPVisionLoader")
+    clip_choices = _choices(clip_required.get("clip_name") or clip_required.get("clip_vision"))
+    adapter_required, adapter_optional = _input_spec(object_info, adapter_name) if adapter_name else ({}, {})
+    explicit_clip = bool(
+        clip_choices and "clip_vision" in set(adapter_required) | set(adapter_optional)
+    )
+    explicit_adapter = bool(model_loader and explicit_clip)
     if not adapter_name or not (unified or model_loader):
         available_identity_nodes = [
             name for name in object_info
@@ -121,7 +152,16 @@ def build_sdxl_identity_graph(request=None, object_info=None):
         (str(node_id) for node_id, node in graph.items() if node.get("class_type") == "CheckpointLoaderSimple"),
         "1",
     )
-    if unified:
+    if explicit_adapter:
+        required, optional = _input_spec(object_info, "IPAdapterModelLoader")
+        model_inputs = {}
+        model_choices = _choices(required.get("ipadapter_file"))
+        model_name = str(request.get("ipadapter_model") or "").strip() or (model_choices[0] if model_choices else "")
+        _set_if_required(model_inputs, required, "ipadapter_file", model_name)
+        graph[loader_id] = {"class_type": "IPAdapterModelLoader", "inputs": model_inputs}
+        model_ref = [checkpoint_id, 0]
+        ipadapter_ref = [loader_id, 0]
+    elif unified:
         required, optional = _input_spec(object_info, "IPAdapterUnifiedLoader")
         loader_inputs = {"model": [checkpoint_id, 0]}
         _set_if_required(loader_inputs, required, "model", [checkpoint_id, 0])
@@ -142,23 +182,36 @@ def build_sdxl_identity_graph(request=None, object_info=None):
         model_ref = [checkpoint_id, 0]
         ipadapter_ref = [loader_id, 0]
 
-    required, optional = _input_spec(object_info, adapter_name)
     adapter_inputs = {
         "model": model_ref,
         "ipadapter": ipadapter_ref,
         "image": [load_id, 0],
     }
+    if explicit_clip:
+        clip_id = str(next_id + 3)
+        clip_name = str(request.get("clip_vision") or clip_choices[0])
+        clip_inputs = {}
+        _set_if_required(clip_inputs, clip_required, "clip_name", clip_name)
+        _set_if_required(clip_inputs, clip_required, "clip_vision", clip_name)
+        graph[clip_id] = {"class_type": "CLIPVisionLoader", "inputs": clip_inputs}
+        adapter_inputs["clip_vision"] = [clip_id, 0]
     defaults = {
         "weight": float(request.get("ipadapter_weight") or 0.85),
-        "weight_type": "standard",
-        "combine_embeds": "concat",
+        "weight_type": _pick_input_choice(
+            request.get("ipadapter_weight_type"), adapter_required.get("weight_type") or adapter_optional.get("weight_type"), "linear"
+        ),
+        "combine_embeds": _pick_input_choice(
+            request.get("ipadapter_combine_embeds"), adapter_required.get("combine_embeds") or adapter_optional.get("combine_embeds"), "concat"
+        ),
         "start_at": 0.0,
         "end_at": 1.0,
-        "embeds_scaling": "V only",
+        "embeds_scaling": _pick_input_choice(
+            request.get("ipadapter_embeds_scaling"), adapter_required.get("embeds_scaling") or adapter_optional.get("embeds_scaling"), "V only"
+        ),
     }
     for name, value in defaults.items():
-        _set_if_required(adapter_inputs, required, name, value)
-        if name in optional:
+        _set_if_required(adapter_inputs, adapter_required, name, value)
+        if name in adapter_optional:
             adapter_inputs.setdefault(name, value)
     graph[adapter_id] = {"class_type": adapter_name, "inputs": adapter_inputs}
     sampler = _node(graph, "KSampler")["inputs"]

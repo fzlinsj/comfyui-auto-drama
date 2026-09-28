@@ -7,6 +7,7 @@ import os
 import urllib.parse
 import urllib.request
 import uuid
+from urllib.error import HTTPError
 
 
 class UrllibTransport:
@@ -16,8 +17,12 @@ class UrllibTransport:
     def _request(self, path, data=None, method=None, headers=None, timeout=30):
         url = self.server + path
         request = urllib.request.Request(url, data=data, method=method, headers=headers or {})
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout) as response:
-            return response.read()
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout) as response:
+                return response.read()
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"ComfyUI HTTP {exc.code} {exc.reason}: {detail[:4000]}") from exc
 
     def get_json(self, path, timeout=15):
         return json.loads(self._request(path, timeout=timeout).decode("utf-8"))
@@ -65,7 +70,16 @@ class UrllibTransport:
 
 
 class ComfyUIClient:
-    MODEL_INPUTS = {"ckpt_name", "unet_name", "clip_name", "vae_name", "lora_name"}
+    MODEL_INPUTS = {
+        "ckpt_name", "unet_name", "clip_name", "vae_name", "lora_name",
+        "ipadapter_file", "clip_vision", "clip_vision_name", "control_net_name",
+    }
+    CLIP_VISION_BY_PRESET = {
+        "PLUS": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+        "PLUS_FACE": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+        "FULL_FACE": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+        "VIT_H": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+    }
 
     def __init__(self, server, transport=None):
         self.server = str(server or "").rstrip("/")
@@ -111,26 +125,52 @@ class ComfyUIClient:
         available = self.object_info()
         missing_nodes = set()
         missing_models = set()
+        missing_inputs = set()
+        explicit_clip_vision = {
+            str((node.get("inputs") or {}).get("clip_name") or (node.get("inputs") or {}).get("clip_vision") or "").strip()
+            for node in (graph or {}).values()
+            if str(node.get("class_type") or "") == "CLIPVisionLoader"
+        }
         for node in (graph or {}).values():
             class_type = str(node.get("class_type") or "")
             if class_type not in available:
                 missing_nodes.add(class_type)
                 continue
             required = ((available.get(class_type) or {}).get("input") or {}).get("required") or {}
+            inputs = node.get("inputs") or {}
+            for name in required:
+                if name not in inputs:
+                    missing_inputs.add(f"{class_type}.{name}")
             for name in self.MODEL_INPUTS:
-                if name not in (node.get("inputs") or {}) or name not in required:
+                if name not in inputs or name not in required:
                     continue
-                value = node["inputs"][name]
+                value = inputs[name]
                 options = required[name]
                 if isinstance(options, (list, tuple)) and options and isinstance(options[0], (list, tuple)):
                     options = options[0]
                 if isinstance(options, (list, tuple)) and value not in options:
                     missing_models.add(str(value))
+            if class_type == "IPAdapterUnifiedLoader":
+                preset = str(inputs.get("preset") or "").strip().upper().replace(" ", "_")
+                expected = self.CLIP_VISION_BY_PRESET.get(preset)
+                if expected:
+                    if explicit_clip_vision:
+                        continue
+                    vision = available.get("CLIPVisionLoader") or {}
+                    vision_required = ((vision.get("input") or {}).get("required") or {})
+                    vision_spec = vision_required.get("clip_name") or vision_required.get("clip_vision")
+                    if not vision_spec:
+                        missing_models.add(expected)
+                        continue
+                    options = vision_spec[0] if isinstance(vision_spec, (list, tuple)) and vision_spec and isinstance(vision_spec[0], (list, tuple)) else vision_spec
+                    if not isinstance(options, (list, tuple)) or expected not in options:
+                        missing_models.add(expected)
         missing_nodes.discard("")
         return {
-            "ok": not missing_nodes and not missing_models,
+            "ok": not missing_nodes and not missing_models and not missing_inputs,
             "missing_nodes": sorted(missing_nodes),
             "missing_models": sorted(missing_models),
+            "missing_inputs": sorted(missing_inputs),
             "warnings": [],
         }
 

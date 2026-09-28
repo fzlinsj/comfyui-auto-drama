@@ -32,6 +32,13 @@ class EnvironmentRecipeTests(unittest.TestCase):
             "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
         )
 
+    def test_recipe_manages_sdxl_clip_vision_with_verified_source(self):
+        recipe = load_recipe("minimax-h3-sdxl")
+        vision = next(item for item in recipe["models"] if item["target_dir"] == "models/clip_vision")
+        self.assertTrue(vision["managed"])
+        self.assertEqual(vision["size_bytes"], 3689912664)
+        self.assertEqual(vision["sha256"], "657723e09f46a7c3957df651601029f66b1748afb12b419816330f16ed45d64d")
+
     def test_recipe_resources_have_checksum_and_safe_paths(self):
         recipe = load_recipe("minimax-h3-sdxl")
         for resource in recipe["models"] + recipe["nodes"]:

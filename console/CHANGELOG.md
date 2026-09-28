@@ -3,6 +3,150 @@
 > 本控制台**每次更新**（代码、规则、界面、工作流任一改动）都必须在此记录一条。
 > 规则见文末「更新说明怎么写」，做不到的更新不算完成。
 
+## 2026-09-28 - v0.13.81 - 预检拦截缺失的 CLIP Vision 元数据
+### 本次更新内容
+
+- 当 ComfyUI 仅提供 `IPAdapterUnifiedLoader`、没有 `CLIPVisionLoader` 文件枚举时，预检现在明确报告所需的 ViT-H CLIP Vision 模型，不再让批量任务进入执行阶段后才失败。
+### 验证方式
+
+- Python 3.13 `console.tests.test_comfyui_client` 定向回归测试
+- Python 3.13 全量 unittest、`py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 远端缺少模型时，批量生图会提前提示模型名；重新扫描并生成部署计划后，模型会进入自动下载任务。
+- 模型下载完成后需重启 ComfyUI，使其重新扫描 `models/clip_vision`。
+
+---
+
+## 2026-09-28 - v0.13.80 - 兼容扁平 CLIP Vision 枚举
+### 本次更新内容
+
+- 兼容部分 ComfyUI 版本以扁平列表返回 `CLIPVisionLoader`、IPAdapter 模型和参数枚举的情况，避免误退回 `IPAdapterUnifiedLoader` 并触发固定 CLIP Vision 文件名错误。
+- 增加扁平 CLIP Vision 枚举回归测试。
+### 验证方式
+
+- Python 3.13 身份工作流回归测试与全量 unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 重启控制台服务后生效；若模型仍未出现在 ComfyUI 下拉项中，需重启 ComfyUI 让其重新扫描模型目录。
+
+---
+
+## 2026-09-28 - v0.13.79 - 绕过 UnifiedLoader 的固定 CLIP Vision 依赖
+### 本次更新内容
+
+- 当 ComfyUI 提供显式 IPAdapter 模型加载器和 CLIP Vision 输入时，身份工作流不再创建 `IPAdapterUnifiedLoader`，避免它提前加载不存在的固定文件。
+- 增加 UnifiedLoader 绕过回归测试。
+### 验证方式
+
+- Python 3.13 身份工作流、ComfyUI 客户端和全量 unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 需要重启控制台服务；模型下载完成后需重启 ComfyUI。
+
+---
+
+## 2026-09-28 - v0.13.78 - 预检接受显式 CLIP Vision 变体
+### 本次更新内容
+
+- 预检发现工作流显式连接 `CLIPVisionLoader` 时，以该节点的实际文件为准，不再额外要求 UnifiedLoader 的固定 ViT-H 文件名。
+- 增加批量身份工作流预检回归测试。
+### 验证方式
+
+- Python 3.13 ComfyUI 客户端、身份工作流和全量 unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 需要重启控制台服务；模型下载完成后需重启 ComfyUI。
+
+---
+
+## 2026-09-28 - v0.13.77 - 显式连接 UnifiedLoader 的 CLIP Vision
+### 本次更新内容
+
+- 当 IPAdapter 节点声明 `clip_vision` 输入时，即使使用 `IPAdapterUnifiedLoader` 也显式连接 ComfyUI 实际可用的 CLIP Vision 文件。
+- 增加 UnifiedLoader 与已安装 CLIP Vision 变体的回归测试。
+### 验证方式
+
+- Python 3.13 身份工作流、环境规划器和全量 unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 需要重启控制台服务；远端模型下载完成后还需重启 ComfyUI。
+
+---
+
+## 2026-09-28 - v0.13.76 - 自动补齐 SDXL CLIP Vision 并兼容已安装变体
+### 本次更新内容
+
+- 核实并纳入官方 IP-Adapter SDXL CLIP Vision 文件的大小与 SHA256，缺失时进入远端自动下载任务。
+- 身份工作流优先使用 ComfyUI 实际提供的 CLIP Vision 下拉项，支持已安装的 ViT-H 兼容文件名。
+- 环境规划器识别 `models/clip_vision` 下的 ViT-H 兼容变体，避免重复下载。
+### 验证方式
+
+- Python 3.13 身份工作流、环境配方和环境规划器回归测试
+- Python 3.13 全量 unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 首次补齐约需下载 3.69 GB；下载完成后需重启 ComfyUI，再重新扫描并执行批量参考图生成。
+- 修改控制台和工作流后需重启控制台服务。
+
+---
+
+## 2026-09-28 - v0.13.75 - 纳入 IPAdapter CLIP Vision 隐式依赖
+### 本次更新内容
+
+- 将 `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` 纳入环境配方的 `models/clip_vision` 资源清单。
+- 预检识别 `IPAdapterUnifiedLoader` 对 CLIP Vision 的隐式依赖，缺失时提前显示模型名。
+- 扩展工作流资源目录识别，支持 `CLIPVisionLoader` 和 `IPAdapterModelLoader`。
+### 验证方式
+
+- Python 3.13 `console.tests.test_comfyui_client`
+- Python 3.13 环境配方和全量 unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 该模型目前标记为需人工补齐，因为项目尚未核实官方 SHA256，不会无校验自动下载未知大文件。
+- 模型放入 `models/clip_vision` 后需重启 ComfyUI，之后重新扫描环境。
+
+---
+
+## 2026-09-28 - v0.13.74 - 兼容 IPAdapterAdvanced 权重枚举
+### 本次更新内容
+
+- 根据 ComfyUI `/object_info` 动态选择 `weight_type`、`combine_embeds` 和 `embeds_scaling`，不再固定发送当前插件版本不接受的 `standard`。
+- 增加 IPAdapterAdvanced 枚举兼容回归测试。
+### 验证方式
+
+- Python 3.13 `console.tests.test_identity_reference`
+- Python 3.13 全量 `console/tests` unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 参考图身份工作流仍要求 IPAdapter 节点实际存在；节点存在时会使用其自身声明的合法参数值。
+- 修改工作流构建代码后需重启控制台服务，再重新执行批量生图。
+
+---
+
+## 2026-09-28 - v0.13.73 - 保留 ComfyUI 400 详情并补齐身份模型预检
+### 本次更新内容
+
+- ComfyUI `/prompt` 返回 HTTP 400 时保留服务端响应正文，控制台可直接看到具体节点和参数错误。
+- 预检增加 IPAdapter、CLIP Vision 和 ControlNet 模型输入，避免环境扫描显示正常但实际身份工作流缺少模型。
+- 增加 HTTP 错误正文和 IPAdapter 缺失模型回归测试。
+### 验证方式
+
+- Python 3.13 `console.tests.test_comfyui_client`
+- Python 3.13 全量 `console/tests` unittest
+- `py_compile` 与 `git diff --check`
+### 影响与注意事项
+
+- 本次不会静默回退到普通文生图；若身份节点或其模型不完整，会明确阻止提交并显示原因。
+- 修改控制台代码后需重启控制台服务；重试前请启动 ComfyUI 并确认 SSH 隧道 `127.0.0.1:6006`。
+
 ---
 
 ## 2026-09-27 - v0.13.72 - 自动启动缺失资源部署

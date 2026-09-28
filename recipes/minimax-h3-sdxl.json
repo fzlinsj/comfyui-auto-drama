@@ -17,6 +17,16 @@
   ],
   "models": [
     {
+      "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "target_dir": "models/clip_vision",
+      "size_bytes": 3689912664,
+      "sha256": "657723e09f46a7c3957df651601029f66b1748afb12b419816330f16ed45d64d",
+      "primary_url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors",
+      "fallback_urls": ["https://hf-mirror.com/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors"],
+      "shareable": true,
+      "managed": true
+    },
+    {
       "filename": "sd_xl_base_1.0.safetensors",
       "target_dir": "models/checkpoints",
       "size_bytes": 6938078334,

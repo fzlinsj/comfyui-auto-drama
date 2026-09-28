@@ -112,6 +112,8 @@ def _compatible_variant(expected, inventory):
         family = "qwen3vl_32b_h3_generation_tail"
     elif "qwen3vl_32b_h3_ultra_uncensored_heretic" in name:
         family = "qwen3vl_32b_"
+    elif "clip-vit-h-14" in name and target_dir == "models/clip_vision":
+        family = "clip_vision_vit_h"
     if not family:
         return None
     candidates = []
@@ -122,6 +124,10 @@ def _compatible_variant(expected, inventory):
         lowered = found_name.lower()
         if family == "qwen3vl_32b_":
             if "qwen3vl_32b" not in lowered or "heretic" not in lowered or "minimax_h3" not in lowered:
+                continue
+        elif family == "clip_vision_vit_h":
+            compact = lowered.replace("_", "-")
+            if "clip-vit-h-14" not in compact:
                 continue
         elif not lowered.startswith(family):
             continue

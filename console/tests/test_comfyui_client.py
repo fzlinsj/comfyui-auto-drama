@@ -1,11 +1,13 @@
 import sys
 import unittest
+from unittest import mock
+from urllib.error import HTTPError
 from pathlib import Path
 
 CONSOLE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CONSOLE_DIR))
 
-from comfyui_client import ComfyUIClient
+from comfyui_client import ComfyUIClient, UrllibTransport
 
 
 class FakeTransport:
@@ -50,6 +52,93 @@ class ComfyUIClientTests(unittest.TestCase):
         result = ComfyUIClient("http://comfy", transport=transport).preflight(graph)
         self.assertEqual(result["missing_nodes"], ["UnknownNode"])
         self.assertEqual(result["missing_models"], ["missing.safetensors"])
+
+    def test_preflight_reports_missing_ipadapter_model(self):
+        transport = FakeTransport({
+            "/object_info": {
+                "IPAdapterModelLoader": {
+                    "input": {"required": {"ipadapter_file": [["installed.bin"]]}}
+                }
+            }
+        })
+        graph = {
+            "1": {
+                "class_type": "IPAdapterModelLoader",
+                "inputs": {"ipadapter_file": "missing.bin"},
+            }
+        }
+        result = ComfyUIClient("http://comfy", transport=transport).preflight(graph)
+        self.assertEqual(result["missing_models"], ["missing.bin"])
+
+    def test_preflight_reports_clip_vision_required_by_unified_loader(self):
+        transport = FakeTransport({
+            "/object_info": {
+                "IPAdapterUnifiedLoader": {
+                    "input": {"required": {"model": ["MODEL"], "preset": [["PLUS_FACE"]]}}
+                },
+                "CLIPVisionLoader": {
+                    "input": {"required": {"clip_name": [["other-vision.safetensors"]]}}
+                },
+            }
+        })
+        graph = {"1": {"class_type": "IPAdapterUnifiedLoader", "inputs": {
+            "model": ["0", 0], "preset": "PLUS_FACE"
+        }}}
+        result = ComfyUIClient("http://comfy", transport=transport).preflight(graph)
+        self.assertIn("CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors", result["missing_models"])
+
+    def test_preflight_reports_clip_vision_when_loader_metadata_is_missing(self):
+        transport = FakeTransport({
+            "/object_info": {
+                "IPAdapterUnifiedLoader": {
+                    "input": {"required": {"model": ["MODEL"], "preset": [["PLUS_FACE"]]}}
+                },
+            }
+        })
+        graph = {"1": {"class_type": "IPAdapterUnifiedLoader", "inputs": {
+            "model": ["0", 0], "preset": "PLUS_FACE"
+        }}}
+        result = ComfyUIClient("http://comfy", transport=transport).preflight(graph)
+        self.assertFalse(result["ok"])
+        self.assertIn("CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors", result["missing_models"])
+
+    def test_preflight_accepts_explicit_installed_clip_vision_for_unified_loader(self):
+        transport = FakeTransport({
+            "/object_info": {
+                "IPAdapterUnifiedLoader": {
+                    "input": {"required": {"model": ["MODEL"], "preset": [["PLUS_FACE"]]}}
+                },
+                "CLIPVisionLoader": {
+                    "input": {"required": {"clip_name": [["installed-clip-vision.safetensors"]]}}
+                },
+                "IPAdapter": {
+                    "input": {"required": {"model": ["MODEL"], "ipadapter": ["IPADAPTER"], "image": ["IMAGE"]},
+                              "optional": {"clip_vision": ["CLIP_VISION"]}}
+                },
+            }
+        })
+        graph = {
+            "1": {"class_type": "IPAdapterUnifiedLoader", "inputs": {"model": ["0", 0], "preset": "PLUS_FACE"}},
+            "2": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "installed-clip-vision.safetensors"}},
+            "3": {"class_type": "IPAdapter", "inputs": {"model": ["1", 0], "ipadapter": ["1", 1], "image": ["4", 0], "clip_vision": ["2", 0]}},
+        }
+        result = ComfyUIClient("http://comfy", transport=transport).preflight(graph)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["missing_models"], [])
+
+    def test_http_error_includes_comfyui_response_body(self):
+        error = HTTPError(
+            "http://comfy/prompt", 400, "Bad Request", {},
+            __import__("io").BytesIO(b'{"error":"invalid node input"}'),
+        )
+
+        class FailingOpener:
+            def open(self, request, timeout=30):
+                raise error
+
+        with mock.patch("urllib.request.build_opener", return_value=FailingOpener()):
+            with self.assertRaisesRegex(RuntimeError, r'ComfyUI HTTP 400 Bad Request:.*invalid node input'):
+                UrllibTransport("http://comfy").post_json("/prompt", {"prompt": {}})
 
     def test_delete_pending_posts_exact_prompt_id(self):
         transport = FakeTransport({})

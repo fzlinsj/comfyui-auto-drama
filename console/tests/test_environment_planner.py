@@ -156,6 +156,52 @@ class EnvironmentPlannerTests(unittest.TestCase):
         self.assertEqual(plan.download_tasks, [])
         self.assertEqual(plan.reused_resources[0]["filename"], "minimax_h3_fl2va_pruned_fp8_scaled.safetensors")
 
+    def test_missing_managed_clip_vision_is_scheduled_for_download(self):
+        scan = {
+            "disk": {"free_bytes": 5_000_000_000},
+            "comfyui": {"present": True, "version": "0.31.2", "models": []},
+            "python": {"version": "3.10.14"},
+        }
+        resource = {
+            "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+            "target_dir": "models/clip_vision", "size_bytes": 100,
+            "sha256": "a" * 64, "primary_url": "https://example.com/clip.safetensors",
+            "fallback_urls": [], "shareable": True, "managed": True,
+        }
+        recipe = {
+            "id": "clip", "version": "1",
+            "requirements": {"min_comfyui": "0.31.0", "min_python": ">=3.10", "min_disk_bytes": 1},
+            "models": [resource], "nodes": [], "checks": [], "workflows": [],
+        }
+        plan = build_plan(scan, recipe)
+        self.assertEqual(plan.status, "plan_ready")
+        self.assertEqual(plan.download_tasks, [dict(resource, resource_kind="model")])
+
+    def test_installed_clip_vision_filename_variant_is_reused(self):
+        scan = {
+            "disk": {"free_bytes": 100},
+            "comfyui": {"present": True, "version": "0.31.2", "models": [{
+                "target_dir": "models/clip_vision",
+                "filename": "clip-vit-h-14-laion2b-s32b-b79k.safetensors",
+                "size_bytes": 42,
+            }]},
+            "python": {"version": "3.10.14"},
+        }
+        recipe = {
+            "id": "clip", "version": "1",
+            "requirements": {"min_comfyui": "0.31.0", "min_python": ">=3.10", "min_disk_bytes": 1},
+            "models": [{
+                "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+                "target_dir": "models/clip_vision", "size_bytes": 99,
+                "sha256": "a" * 64, "primary_url": "https://example.com/clip.safetensors",
+                "fallback_urls": [], "shareable": True, "managed": True,
+            }],
+            "nodes": [], "checks": [], "workflows": [],
+        }
+        plan = build_plan(scan, recipe)
+        self.assertFalse(plan.download_tasks)
+        self.assertEqual(plan.reused_resources[0]["filename"], "clip-vit-h-14-laion2b-s32b-b79k.safetensors")
+
 
 if __name__ == "__main__":
     unittest.main()

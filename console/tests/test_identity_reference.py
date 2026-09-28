@@ -61,6 +61,65 @@ class IdentityReferenceTests(unittest.TestCase):
                 },
             )
 
+    def test_identity_graph_uses_advertised_ipadapter_enum_values(self):
+        info = self._ipadapter_info()
+        info.pop("IPAdapter")
+        info["IPAdapterAdvanced"] = {"input": {"required": {
+            "model": ["MODEL"], "ipadapter": ["IPADAPTER"], "image": ["IMAGE"],
+            "weight": ["FLOAT"],
+            "weight_type": [["linear", "ease in", "ease out"]],
+            "combine_embeds": [["concat", "add"]],
+            "embeds_scaling": [["V only", "K+V"]],
+        }}}
+        graph = build_sdxl_identity_graph(
+            {"reference_image": "anchor.png"}, info,
+        )
+        adapter = next(node for node in graph.values() if node["class_type"] == "IPAdapterAdvanced")
+        self.assertEqual(adapter["inputs"]["weight_type"], "linear")
+        self.assertEqual(adapter["inputs"]["combine_embeds"], "concat")
+
+    def test_identity_graph_uses_installed_clip_vision_variant(self):
+        info = self._ipadapter_info()
+        info.pop("IPAdapterUnifiedLoader")
+        info["IPAdapterModelLoader"] = {"input": {"required": {"ipadapter_file": [["ip-adapter-plus.safetensors"]]}}}
+        info["CLIPVisionLoader"] = {"input": {"required": {"clip_name": [["installed-clip-vision.safetensors"]]}}}
+        info.pop("IPAdapter")
+        info["IPAdapterAdvanced"] = {"input": {"required": {
+            "model": ["MODEL"], "ipadapter": ["IPADAPTER"], "image": ["IMAGE"],
+            "clip_vision": ["CLIP_VISION"], "weight": ["FLOAT"],
+        }}}
+        graph = build_sdxl_identity_graph({"reference_image": "anchor.png"}, info)
+        clip_loader = next(node for node in graph.values() if node["class_type"] == "CLIPVisionLoader")
+        self.assertEqual(clip_loader["inputs"]["clip_name"], "installed-clip-vision.safetensors")
+        adapter = next(node for node in graph.values() if node["class_type"] == "IPAdapterAdvanced")
+        self.assertEqual(adapter["inputs"]["clip_vision"][0], next(
+            node_id for node_id, node in graph.items() if node is clip_loader
+        ))
+
+    def test_unified_loader_uses_explicit_clip_vision_when_supported(self):
+        info = self._ipadapter_info()
+        info["IPAdapterModelLoader"] = {"input": {"required": {"ipadapter_file": [["ip-adapter-plus.safetensors"]]}}}
+        info["CLIPVisionLoader"] = {"input": {"required": {"clip_name": [["installed-clip-vision.safetensors"]]}}}
+        info["IPAdapter"]["input"]["optional"] = {"clip_vision": ["CLIP_VISION"]}
+        graph = build_sdxl_identity_graph({"reference_image": "anchor.png"}, info)
+        self.assertNotIn("IPAdapterUnifiedLoader", [node["class_type"] for node in graph.values()])
+        self.assertIn("IPAdapterModelLoader", [node["class_type"] for node in graph.values()])
+        clip_id, clip_loader = next((node_id, node) for node_id, node in graph.items() if node["class_type"] == "CLIPVisionLoader")
+        adapter = next(node for node in graph.values() if node["class_type"] == "IPAdapter")
+        self.assertEqual(clip_loader["inputs"]["clip_name"], "installed-clip-vision.safetensors")
+        self.assertEqual(adapter["inputs"]["clip_vision"], [clip_id, 0])
+
+    def test_identity_graph_accepts_flat_clip_vision_choices(self):
+        info = self._ipadapter_info()
+        info["IPAdapterModelLoader"] = {"input": {"required": {"ipadapter_file": ["ip-adapter-plus.safetensors"]}}}
+        info["CLIPVisionLoader"] = {"input": {"required": {"clip_name": ["installed-clip-vision.safetensors"]}}}
+        info["IPAdapter"]["input"]["optional"] = {"clip_vision": ["CLIP_VISION"]}
+        graph = build_sdxl_identity_graph({"reference_image": "anchor.png"}, info)
+        classes = [node["class_type"] for node in graph.values()]
+        self.assertNotIn("IPAdapterUnifiedLoader", classes)
+        self.assertIn("CLIPVisionLoader", classes)
+        self.assertIn("IPAdapterModelLoader", classes)
+
     def test_comfyui_generation_uploads_and_uses_reference_image(self):
         class FakeClient:
             submitted_graph = None

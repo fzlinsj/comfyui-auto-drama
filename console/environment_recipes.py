@@ -28,6 +28,9 @@ _LOADER_DIRECTORIES = {
     "MiniMaxH3TurboLoRA": "models/loras",
     "MiniMaxH3GenerationTailLoader": "models/text_encoders",
     "ControlNetLoader": "models/controlnet",
+    "CLIPVisionLoader": "models/clip_vision",
+    "CLIPVisionEncode": "models/clip_vision",
+    "IPAdapterModelLoader": "models/ipadapter",
     "UpscaleModelLoader": "models/upscale_models",
 }
 
@@ -92,6 +95,9 @@ def extract_workflow_resources(workflow_path):
             return
         node_type = str(node.get("type") or node.get("class_type") or "")
         directory = _LOADER_DIRECTORIES.get(node_type)
+        # IPAdapterUnifiedLoader resolves these files internally, so editor
+        # workflows may only expose the preset. Keep the dependency explicit
+        # in recipes instead of waiting for ComfyUI to fail at queue time.
         if not directory:
             return
         values = node.get("widgets_values")
