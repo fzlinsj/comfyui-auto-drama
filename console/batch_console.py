@@ -4305,6 +4305,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.urlparse(self.path)
+        if path.path == "/api/environments/credentials/status":
+            query = urllib.parse.parse_qs(path.query)
+            platform = (query.get("platform") or ["unknown"])[0]
+            ssh_command = (query.get("ssh_command") or [""])[0]
+            try:
+                result = get_environment_manager().get_credential_status(platform, ssh_command)
+                self._send(200, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                code = getattr(exc, "code", "E-VERIFY")
+                self._send(400, json.dumps({"error_code": code, "error": str(exc)}, ensure_ascii=False))
+            return
         if path.path == "/api/environments/recipes":
             try:
                 self._send(200, json.dumps({"recipes": get_environment_manager().list_recipes()}, ensure_ascii=False))
@@ -4617,6 +4628,14 @@ class Handler(BaseHTTPRequestHandler):
                 code = getattr(exc, "code", "E-SSH-AUTH")
                 details = getattr(exc, "details", {})
                 self._send(400, json.dumps({"error_code": code, "error": str(exc), "details": details}, ensure_ascii=False))
+            return
+        if path == "/api/environments/credentials/clear":
+            try:
+                result = get_environment_manager().clear_saved_password(body.get("target_id"))
+                self._send(200, json.dumps(result, ensure_ascii=False))
+            except Exception as exc:
+                code = getattr(exc, "code", "E-VERIFY")
+                self._send(400, json.dumps({"error_code": code, "error": str(exc)}, ensure_ascii=False))
             return
         if path == "/api/environments/plan":
             try:

@@ -18,6 +18,8 @@ class EnvironmentApiRouteTests(unittest.TestCase):
             "/api/environments/jobs/",
             "/api/environments/recipes",
             "/api/environments/manifest/",
+            "/api/environments/credentials/status",
+            "/api/environments/credentials/clear",
             "/api/environment/ssh-command",
         ):
             self.assertIn(route, source)
@@ -32,6 +34,13 @@ class EnvironmentApiRouteTests(unittest.TestCase):
         source = Path(batch_console.__file__).read_text(encoding="utf-8")
         self.assertIn("get_environment_manager", source)
         self.assertIn("redact_payload", Path(CONSOLE_DIR / "environment_manager.py").read_text(encoding="utf-8"))
+
+    def test_credential_routes_use_manager_status_and_clear_methods(self):
+        source = Path(batch_console.__file__).read_text(encoding="utf-8")
+        self.assertIn("get_credential_status", source)
+        self.assertIn("clear_saved_password", source)
+        self.assertNotIn('body.get("credential_ref")', source)
+        self.assertNotIn('body.get("ciphertext")', source)
 
 
 if __name__ == "__main__":

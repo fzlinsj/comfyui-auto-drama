@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 try:
+    from .environment_credentials import CredentialStoreError, EnvironmentCredentialStore
     from .environment_deployer import EnvironmentDeployer
     from .environment_models import EnvironmentError, redact_environment_data
     from .environment_planner import build_plan
@@ -16,6 +17,7 @@ try:
     from .environment_ssh import parse_ssh_command, SSHSession
     from .environment_downloader import RemoteDownloader
 except ImportError:
+    from environment_credentials import CredentialStoreError, EnvironmentCredentialStore
     from environment_deployer import EnvironmentDeployer
     from environment_models import EnvironmentError, redact_environment_data
     from environment_planner import build_plan
@@ -38,8 +40,10 @@ def _strip_fingerprint_fields(value):
 
 
 class EnvironmentManager:
-    def __init__(self, store, session_factory=None, downloader_factory=None, verifier=None):
+    def __init__(self, store, session_factory=None, downloader_factory=None, verifier=None,
+                 credential_store=None):
         self.store = store
+        self.credential_store = credential_store or EnvironmentCredentialStore()
         self.session_factory = session_factory or (lambda connection, credential=None: SSHSession(connection, credential=credential))
         self.downloader_factory = downloader_factory
         self.verifier = verifier
@@ -52,38 +56,58 @@ class EnvironmentManager:
     def scan_target(self, payload):
         payload = dict(payload or {})
         connection = parse_ssh_command(payload.get("ssh_command"))
-        credential = {}
-        if payload.get("password"):
-            credential["password"] = payload["password"]
-        if payload.get("private_key"):
-            credential["private_key"] = payload["private_key"]
         existing = self.store.find_environment_target(
             payload.get("platform") or "unknown",
             connection.host,
             connection.username,
             connection.port,
         )
+        credential = {}
+        supplied_password = str(payload.get("password") or "")
+        password = supplied_password
+        used_saved_password = False
+        existing_ref = str((existing or {}).get("credential_ref") or "")
+        if not password and existing_ref:
+            try:
+                password = self.credential_store.load(existing_ref) or ""
+                used_saved_password = bool(password)
+            except CredentialStoreError as exc:
+                raise EnvironmentError(
+                    "已保存的 SSH 密码无法读取，请重新输入或清除",
+                    "E-SSH-AUTH",
+                    {"saved_credential_invalid": True},
+                ) from exc
+        if password:
+            credential["password"] = password
+        if payload.get("private_key"):
+            credential["private_key"] = payload["private_key"]
         if existing and existing.get("fingerprint"):
             credential["fingerprint"] = existing["fingerprint"]
         session = self.session_factory(connection, credential=credential)
-        observed_fingerprint = session.observe_fingerprint()
-        expected_fingerprint = str((existing or {}).get("fingerprint") or "")
-        retrust = bool(payload.get("retrust"))
-        if expected_fingerprint and observed_fingerprint != expected_fingerprint and not retrust:
-            raise EnvironmentError(
-                "服务器身份发生变化，请确认当前实例后重新建立信任",
-                "E-SSH-FINGERPRINT",
-                {"target_id": existing["target_id"], "can_retrust": True},
-            )
-        session.verify_fingerprint(observed_fingerprint, confirmed=True)
-        fingerprint = observed_fingerprint
-        result = EnvironmentScanner(
-            session,
-            data_path=payload.get("data_path") or "/root/autodl-tmp",
-            comfy_path=payload.get("comfy_path") or "/root/ComfyUI",
-            host_fingerprint=fingerprint,
-            platform_hint=payload.get("platform") or "",
-        ).scan()
+        try:
+            observed_fingerprint = session.observe_fingerprint()
+            expected_fingerprint = str((existing or {}).get("fingerprint") or "")
+            retrust = bool(payload.get("retrust"))
+            if expected_fingerprint and observed_fingerprint != expected_fingerprint and not retrust:
+                raise EnvironmentError(
+                    "服务器身份发生变化，请确认当前实例后重新建立信任",
+                    "E-SSH-FINGERPRINT",
+                    {"target_id": existing["target_id"], "can_retrust": True},
+                )
+            session.verify_fingerprint(observed_fingerprint, confirmed=True)
+            fingerprint = observed_fingerprint
+            result = EnvironmentScanner(
+                session,
+                data_path=payload.get("data_path") or "/root/autodl-tmp",
+                comfy_path=payload.get("comfy_path") or "/root/ComfyUI",
+                host_fingerprint=fingerprint,
+                platform_hint=payload.get("platform") or "",
+            ).scan()
+        except EnvironmentError as exc:
+            if used_saved_password and exc.code == "E-SSH-AUTH":
+                exc.details = dict(exc.details or {})
+                exc.details["saved_credential_invalid"] = True
+            raise
         if existing:
             target_id = existing["target_id"]
             self.store.update_environment_target_fingerprint(target_id, fingerprint)
@@ -93,7 +117,7 @@ class EnvironmentManager:
                 host=connection.host,
                 username=connection.username,
                 port=connection.port,
-                credential_ref=f"session-{uuid.uuid4().hex[:12]}",
+                credential_ref="",
                 fingerprint=fingerprint,
                 metadata={
                     "data_path": payload.get("data_path") or "/root/autodl-tmp",
@@ -103,9 +127,68 @@ class EnvironmentManager:
         scan_data = result.to_dict()
         scan_id = self.store.save_environment_scan(target_id, scan_data, result.raw_summary)
         public_scan = _strip_fingerprint_fields(scan_data)
+        credential_saved = None
+        if bool(payload.get("remember_password")) and supplied_password:
+            try:
+                credential_ref = self.credential_store.save(
+                    supplied_password,
+                    credential_ref=existing_ref or None,
+                )
+                self.store.update_environment_target_credential_ref(target_id, credential_ref)
+                credential_saved = True
+            except CredentialStoreError:
+                credential_saved = False
+        credential_status = self._credential_status_for_target(
+            self.store.get_environment_target(target_id)
+        )
         with self._lock:
             self._sessions[target_id] = session
-        return {"target_id": target_id, "scan_id": scan_id, "scan": public_scan}
+        return {
+            "target_id": target_id,
+            "scan_id": scan_id,
+            "scan": public_scan,
+            "credential_storage_supported": self.credential_store.supported,
+            "has_saved_password": credential_status["has_saved_password"],
+            "credential_saved": credential_saved,
+        }
+
+    def _credential_status_for_target(self, target):
+        credential_ref = str((target or {}).get("credential_ref") or "")
+        has_saved_password = False
+        if credential_ref and self.credential_store.supported:
+            try:
+                has_saved_password = self.credential_store.load(credential_ref) is not None
+            except CredentialStoreError:
+                has_saved_password = False
+        return {
+            "credential_storage_supported": self.credential_store.supported,
+            "target_id": (target or {}).get("target_id", ""),
+            "has_saved_password": has_saved_password,
+        }
+
+    def get_credential_status(self, platform, ssh_command):
+        connection = parse_ssh_command(ssh_command)
+        target = self.store.find_environment_target(
+            platform or "unknown",
+            connection.host,
+            connection.username,
+            connection.port,
+        )
+        return self._credential_status_for_target(target)
+
+    def clear_saved_password(self, target_id):
+        target = self.store.get_environment_target(target_id)
+        if not target:
+            raise EnvironmentError("环境目标不存在", "E-VERIFY")
+        credential_ref = str(target.get("credential_ref") or "")
+        if credential_ref:
+            self.credential_store.delete(credential_ref)
+            self.store.update_environment_target_credential_ref(target_id, "")
+        return {
+            "credential_storage_supported": self.credential_store.supported,
+            "target_id": str(target_id),
+            "has_saved_password": False,
+        }
 
     def make_plan(self, target_id, scan_id, recipe_id="minimax-h3-sdxl"):
         recipe = load_recipe(recipe_id)

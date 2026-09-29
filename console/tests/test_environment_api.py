@@ -15,6 +15,24 @@ from environment_ssh import FakeSSHSession
 from task_store import TaskStore
 
 
+class FakeCredentialStore:
+    supported = True
+
+    def __init__(self):
+        self.values = {}
+
+    def save(self, password, credential_ref=None):
+        ref = credential_ref or "saved-ref"
+        self.values[ref] = password
+        return ref
+
+    def load(self, credential_ref):
+        return self.values.get(credential_ref)
+
+    def delete(self, credential_ref):
+        return self.values.pop(credential_ref, None) is not None
+
+
 class EnvironmentApiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -62,6 +80,96 @@ class EnvironmentApiTests(unittest.TestCase):
         self.assertEqual(result["scan"]["gpu"]["name"], "RTX 3090")
         target = self.store.find_environment_target("autodl", "host", "root", 22)
         self.assertEqual(target["fingerprint"], "SHA256:changed")
+
+    def test_successful_scan_can_save_and_reuse_password(self):
+        credentials = FakeCredentialStore()
+        captured = []
+        manager = EnvironmentManager(
+            self.store,
+            session_factory=lambda connection, credential=None: (
+                captured.append(dict(credential or {})) or self.session
+            ),
+            credential_store=credentials,
+        )
+        first = manager.scan_target({
+            "platform": "autodl",
+            "ssh_command": "ssh root@host",
+            "password": "secret",
+            "remember_password": True,
+        })
+        self.assertTrue(first["credential_saved"])
+        self.assertTrue(first["has_saved_password"])
+        self.assertNotIn("secret", json.dumps(first, ensure_ascii=False))
+        second = manager.scan_target({
+            "platform": "autodl",
+            "ssh_command": "ssh root@host",
+            "password": "",
+        })
+        self.assertEqual(captured[-1]["password"], "secret")
+        self.assertTrue(second["has_saved_password"])
+
+    def test_password_is_not_saved_when_authentication_fails(self):
+        credentials = FakeCredentialStore()
+
+        class FailingSession(FakeSSHSession):
+            def observe_fingerprint(self):
+                raise EnvironmentError("SSH 认证失败", "E-SSH-AUTH")
+
+        manager = EnvironmentManager(
+            self.store,
+            session_factory=lambda *args, **kwargs: FailingSession(),
+            credential_store=credentials,
+        )
+        with self.assertRaises(EnvironmentError):
+            manager.scan_target({
+                "platform": "autodl",
+                "ssh_command": "ssh root@host",
+                "password": "wrong",
+                "remember_password": True,
+            })
+        self.assertEqual(credentials.values, {})
+
+    def test_saved_password_auth_failure_is_marked_without_exposing_password(self):
+        credentials = FakeCredentialStore()
+        target_id = self.store.create_environment_target(
+            "autodl", "host", username="root", credential_ref="saved-ref"
+        )
+        credentials.values["saved-ref"] = "old-secret"
+
+        class FailingSession(FakeSSHSession):
+            def observe_fingerprint(self):
+                raise EnvironmentError("SSH 认证失败", "E-SSH-AUTH")
+
+        manager = EnvironmentManager(
+            self.store,
+            session_factory=lambda *args, **kwargs: FailingSession(),
+            credential_store=credentials,
+        )
+        with self.assertRaises(EnvironmentError) as ctx:
+            manager.scan_target({"platform": "autodl", "ssh_command": "ssh root@host"})
+        self.assertTrue(ctx.exception.details["saved_credential_invalid"])
+        self.assertEqual(self.store.get_environment_target(target_id)["credential_ref"], "saved-ref")
+        self.assertNotIn("old-secret", str(ctx.exception.details))
+
+    def test_credential_status_and_clear_are_target_scoped(self):
+        credentials = FakeCredentialStore()
+        manager = EnvironmentManager(
+            self.store,
+            session_factory=lambda *args, **kwargs: self.session,
+            credential_store=credentials,
+        )
+        scan = manager.scan_target({
+            "platform": "autodl",
+            "ssh_command": "ssh root@host",
+            "password": "secret",
+            "remember_password": True,
+        })
+        status = manager.get_credential_status("autodl", "ssh root@host")
+        self.assertEqual(status["target_id"], scan["target_id"])
+        self.assertTrue(status["has_saved_password"])
+        cleared = manager.clear_saved_password(scan["target_id"])
+        self.assertFalse(cleared["has_saved_password"])
+        self.assertFalse(manager.clear_saved_password(scan["target_id"])["has_saved_password"])
 
     def test_plan_references_recipe_version(self):
         scan = self.manager.scan_target({"platform": "autodl", "ssh_command": "ssh root@host", "password": "secret"})

@@ -45,6 +45,21 @@ class EnvironmentUiTests(unittest.TestCase):
         self.assertNotIn("localStorage.setItem('toonflow.environment.password'", self.source)
         self.assertNotIn("localStorage.setItem('toonflow.environment.privateKey'", self.source)
 
+    def test_environment_password_can_be_remembered_and_cleared_safely(self):
+        for marker in (
+            'id="environmentRememberPassword"',
+            'id="environmentCredentialStatus"',
+            'id="btnEnvironmentClearPassword"',
+            "remember_password:",
+            "refreshEnvironmentCredentialStatus",
+            "clearEnvironmentSavedPassword",
+            "/api/environments/credentials/status",
+            "/api/environments/credentials/clear",
+        ):
+            self.assertIn(marker, self.source)
+        self.assertNotIn("localStorage.setItem(environmentPassword", self.source)
+        self.assertNotIn("sessionStorage.setItem(environmentPassword", self.source)
+
     def test_environment_controls_are_bound_and_recipe_loading_starts(self):
         for binding in (
             "$('btnEnvironmentScan').addEventListener('click', scanEnvironment)",
@@ -53,6 +68,8 @@ class EnvironmentUiTests(unittest.TestCase):
             "$('btnEnvironmentDeploy').addEventListener('click', deployEnvironment)",
             "$('btnEnvironmentRetry').addEventListener('click', retryEnvironmentStep)",
             "$('btnEnvironmentCancel').addEventListener('click', cancelEnvironmentJob)",
+            "$('btnEnvironmentClearPassword').addEventListener('click'",
+            "loadSavedEnvironmentSshCommand().then(refreshEnvironmentCredentialStatus)",
             "loadEnvironmentRecipes();",
         ):
             self.assertIn(binding, self.source)

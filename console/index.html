@@ -645,7 +645,11 @@
           <input type="text" id="environmentSshCommand" placeholder="ssh -p 18078 root@connect.example.com" autocomplete="off">
         </label>
         <label class="field">SSH 密码
-          <input type="password" id="environmentPassword" autocomplete="new-password" placeholder="仅本次扫描使用">
+          <input type="password" id="environmentPassword" autocomplete="new-password" placeholder="可留空使用已保存密码">
+        </label>
+        <label class="field">密码保存
+          <span><input type="checkbox" id="environmentRememberPassword"> 记住 SSH 密码</span>
+          <small id="environmentCredentialStatus" class="hint">未保存密码</small>
         </label>
         <label class="field">数据盘路径
           <input type="text" id="environmentDataPath" value="/root/autodl-tmp" placeholder="/root/autodl-tmp">
@@ -657,6 +661,7 @@
       <div class="environment-actions">
         <button class="btn blue" id="btnEnvironmentScan">扫描远端环境</button>
         <button class="btn" id="btnEnvironmentRetrust" style="display:none">重新建立信任</button>
+        <button class="btn" id="btnEnvironmentClearPassword" disabled>清除已保存密码</button>
         <span id="environmentScanStatus" class="hint">尚未扫描</span>
       </div>
       <div id="environmentScanSummary" class="environment-summary">扫描结果会显示 GPU、磁盘、Python、ComfyUI 和已有节点摘要。</div>
@@ -2392,6 +2397,49 @@ function environmentSetSummary(id, text, kind='') {
   box.textContent = text || '';
   box.className = `environment-summary${kind ? ' ' + kind : ''}`;
 }
+function renderEnvironmentCredentialStatus(status) {
+  status = status || {};
+  const supported = status.credential_storage_supported !== false;
+  const saved = Boolean(status.has_saved_password);
+  environmentState.targetId = String(status.target_id || '');
+  $('environmentCredentialStatus').textContent = !supported
+    ? '当前系统不支持安全保存'
+    : (saved ? '已安全保存，密码框可留空' : '未保存密码');
+  $('btnEnvironmentClearPassword').disabled = !saved || !environmentState.targetId;
+}
+async function refreshEnvironmentCredentialStatus() {
+  const sshCommand = $('environmentSshCommand').value.trim();
+  if (!sshCommand) {
+    renderEnvironmentCredentialStatus({has_saved_password:false});
+    return;
+  }
+  try {
+    const params = new URLSearchParams({
+      platform: $('environmentPlatform').value,
+      ssh_command: sshCommand,
+    });
+    const response = await fetch('/api/environments/credentials/status?' + params.toString());
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取密码保存状态失败');
+    renderEnvironmentCredentialStatus(data);
+  } catch (_) {
+    renderEnvironmentCredentialStatus({has_saved_password:false});
+  }
+}
+async function clearEnvironmentSavedPassword() {
+  if (!environmentState.targetId) return;
+  const response = await fetch('/api/environments/credentials/clear', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({target_id:environmentState.targetId}),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || '清除已保存密码失败');
+  $('environmentPassword').value = '';
+  $('environmentRememberPassword').checked = false;
+  renderEnvironmentCredentialStatus(data);
+  environmentSetSummary('environmentScanSummary', '已清除本机保存的 SSH 密码。', 'ok');
+}
 async function loadEnvironmentRecipes() {
   try {
     const r = await fetch('/api/environments/recipes');
@@ -2411,6 +2459,7 @@ function environmentScanPayload(retrust = false) {
     data_path: $('environmentDataPath').value.trim(),
     comfy_path: $('environmentComfyPath').value.trim(),
     password: $('environmentPassword').value,
+    remember_password: Boolean($('environmentRememberPassword').checked),
     retrust: Boolean(retrust),
   };
 }
@@ -2453,11 +2502,20 @@ async function scanEnvironment(retrust = false) {
         );
         return;
       }
+      if (d.details?.saved_credential_invalid) {
+        $('environmentCredentialStatus').textContent = '已保存密码失效，请重新输入或清除';
+        $('btnEnvironmentClearPassword').disabled = !environmentState.targetId;
+      }
       throw new Error(`${d.error_code || 'E-SSH-AUTH'}：${d.error || '扫描失败'}`);
     }
     environmentState.targetId = d.target_id || '';
     environmentState.scanId = d.scan_id || '';
     environmentState.plan = null;
+    renderEnvironmentCredentialStatus(d);
+    if (d.credential_saved === true) $('environmentPassword').value = '';
+    if ($('environmentRememberPassword').checked && d.credential_saved === false) {
+      $('environmentCredentialStatus').textContent = '连接成功，但密码保存失败';
+    }
     $('btnEnvironmentPlan').disabled = !environmentState.targetId || !environmentState.scanId;
     $('btnEnvironmentDeploy').disabled = true;
     $('btnEnvironmentRetrust').style.display = 'none';
@@ -3866,6 +3924,11 @@ $('imgProviderType').addEventListener('change', () => {
 $('btnEnvironmentScan').addEventListener('click', scanEnvironment);
 $('environmentSshCommand').addEventListener('input', saveEnvironmentSshCommand);
 $('environmentSshCommand').addEventListener('change', persistEnvironmentSshCommand);
+$('environmentSshCommand').addEventListener('change', refreshEnvironmentCredentialStatus);
+$('environmentPlatform').addEventListener('change', refreshEnvironmentCredentialStatus);
+$('btnEnvironmentClearPassword').addEventListener('click', () => {
+  clearEnvironmentSavedPassword().catch(e => environmentSetSummary('environmentScanSummary', e.message, 'error'));
+});
 $('btnEnvironmentRetrust').addEventListener('click', retrustEnvironment);
 $('btnEnvironmentPlan').addEventListener('click', loadEnvironmentPlan);
 $('btnEnvironmentDeploy').addEventListener('click', deployEnvironment);
@@ -3897,7 +3960,7 @@ renderProjects();
 loadAssembleHistory();
 checkLlm();
 loadConfigIntoForm();
-loadSavedEnvironmentSshCommand();
+loadSavedEnvironmentSshCommand().then(refreshEnvironmentCredentialStatus).catch(() => {});
 loadEnvironmentRecipes();
 resumeExpand();
 goStep(1);
