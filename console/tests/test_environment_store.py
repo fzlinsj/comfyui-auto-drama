@@ -22,6 +22,19 @@ class EnvironmentStoreTests(unittest.TestCase):
         self.assertNotIn("password", columns)
         self.assertNotIn("private_key", columns)
 
+    def test_environment_target_credential_ref_can_be_updated_and_cleared(self):
+        target_id = self.store.create_environment_target(
+            "autodl", "gpu.example", username="root", port=18078
+        )
+        self.assertEqual(self.store.get_environment_target(target_id)["credential_ref"], "")
+        self.store.update_environment_target_credential_ref(target_id, "credential-123")
+        self.assertEqual(
+            self.store.get_environment_target(target_id)["credential_ref"],
+            "credential-123",
+        )
+        self.store.update_environment_target_credential_ref(target_id, "")
+        self.assertEqual(self.store.get_environment_target(target_id)["credential_ref"], "")
+
     def test_environment_target_scan_plan_and_steps_round_trip(self):
         target_id = self.store.create_environment_target(
             platform="autodl", host="gpu.example", username="root", port=18078,

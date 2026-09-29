@@ -218,6 +218,31 @@ class TaskStore:
         finally:
             conn.close()
 
+    def get_environment_target(self, target_id):
+        """Load one environment target by its opaque identifier."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM environment_targets WHERE target_id = ?",
+                (str(target_id),),
+            ).fetchone()
+            return self._environment_row(row, {})
+        finally:
+            conn.close()
+
+    def update_environment_target_credential_ref(self, target_id, credential_ref):
+        """Update only the opaque local credential reference."""
+        now = _now()
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE environment_targets SET credential_ref = ?, updated_at = ? WHERE target_id = ?",
+                (str(credential_ref or ""), now, str(target_id)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def update_environment_target_fingerprint(self, target_id, fingerprint, status="scanned"):
         """Update only the trusted fingerprint and scan status."""
         now = _now()
